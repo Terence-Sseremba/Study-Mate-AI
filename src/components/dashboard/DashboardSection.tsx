@@ -12,20 +12,23 @@ import {
   Sparkles,
   Info,
   CheckCircle2,
-  FolderOpen,
+  Calendar,
 } from 'lucide-react';
-import type { StudentProfile, StudyMaterial, TopicMastery, QuizAttempt } from '../../types';
+import type { StudentProfile, StudyMaterial, TopicMastery, QuizAttempt, ReviewRecord } from '../../types/index.ts';
 import type { SectionType } from '../layout/AppShell';
 import { getTimeAwareGreeting } from '../../lib/greeting';
+import { getDueReviews, getUpcomingReviews, formatTimeUntilDue } from '../../lib/spacedRepetition';
 
 interface DashboardSectionProps {
   student: StudentProfile;
   materials: StudyMaterial[];
   masteryTopics: TopicMastery[];
   recentAttempts: QuizAttempt[];
+  reviewRecords: ReviewRecord[];
   onNavigate: (section: SectionType) => void;
   onSelectTopicForTutor: (topicName: string, materialId?: string) => void;
   onStartQuizForTopic: (topicId: string) => void;
+  onStartSpacedReview: (topicId?: string) => void;
 }
 
 export const DashboardSection: React.FC<DashboardSectionProps> = ({
@@ -33,9 +36,11 @@ export const DashboardSection: React.FC<DashboardSectionProps> = ({
   materials,
   masteryTopics,
   recentAttempts,
+  reviewRecords,
   onNavigate,
   onSelectTopicForTutor,
   onStartQuizForTopic,
+  onStartSpacedReview,
 }) => {
   // Safe client-side time-aware greeting calculation
   const [greeting, setGreeting] = useState<string>('Welcome to StudyMate AI');
@@ -61,6 +66,9 @@ export const DashboardSection: React.FC<DashboardSectionProps> = ({
   const topicsNeedingRevision = masteryTopics.filter(
     (t) => t.status === 'review_needed' || t.masteryPercentage < 60
   );
+
+  const dueReviews = getDueReviews(reviewRecords);
+  const upcomingReviews = getUpcomingReviews(reviewRecords);
 
   return (
     <div className="space-y-6">
@@ -110,7 +118,7 @@ export const DashboardSection: React.FC<DashboardSectionProps> = ({
         <div className="space-y-0.5">
           <span className="font-medium text-slate-300">Live Learning Calibrations:</span>
           <p>
-            StudyMate AI derives all progress scores, mastery indicators, and revision alerts
+            StudyMate AI derives all progress scores, mastery indicators, and spaced repetition schedules
             exclusively from your actual quiz answers and uploaded documents. No simulated or prefilled history is shown.
           </p>
         </div>
@@ -223,35 +231,91 @@ export const DashboardSection: React.FC<DashboardSectionProps> = ({
           </button>
         </div>
 
-        {/* Card 4: Topics Needing Revision */}
+        {/* Card 4: Spaced Reviews Due */}
         <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium">Topics Needing Revision</span>
-            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <span className="text-xs font-medium">Spaced Reviews Due</span>
+            <Clock className={`w-4 h-4 ${dueReviews.length > 0 ? 'text-indigo-400' : 'text-slate-400'}`} />
           </div>
           <div className="my-3">
-            <div className="text-2xl font-bold font-mono text-slate-100">
-              {topicsNeedingRevision.length}
+            <div className={`text-2xl font-bold font-mono ${dueReviews.length > 0 ? 'text-indigo-400' : 'text-slate-200'}`}>
+              {dueReviews.length}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">
-              {topicsNeedingRevision.length === 0
-                ? 'No priority revision alerts'
-                : 'Scored below 60% mastery threshold'}
+              {dueReviews.length > 0
+                ? `${dueReviews.length} topic${dueReviews.length === 1 ? '' : 's'} scheduled for review`
+                : upcomingReviews.length > 0
+                ? `Next review in ${formatTimeUntilDue(upcomingReviews[0].nextReviewDueAt)}`
+                : 'No reviews scheduled yet'}
             </div>
           </div>
           <button
-            onClick={() => onNavigate(topicsNeedingRevision.length > 0 ? 'progress' : 'assessments')}
+            onClick={() => onStartSpacedReview()}
             className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium pt-2 border-t border-slate-800/60 transition-colors"
           >
-            <span>{topicsNeedingRevision.length > 0 ? 'Review weak topics' : 'Practice new topics'}</span>
+            <span>{dueReviews.length > 0 ? 'Review due topics now' : 'View spaced schedule'}</span>
             <ArrowRight className="w-3 h-3" />
           </button>
         </div>
       </div>
 
+      {/* Spaced Reviews Due Card (when reviews are due) */}
+      {dueReviews.length > 0 && (
+        <div className="bg-[#131B2E] border border-indigo-900/60 rounded-xl p-5 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <span>Spaced Reviews Ready</span>
+                  <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-indigo-900 text-indigo-300">
+                    {dueReviews.length} Due
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Calculated using progressive intervals (1d → 3d → 7d → 14d → 30d) based on your real performance.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => onStartSpacedReview()}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5 shrink-0"
+            >
+              <span>Review All Due Topics</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800">
+            {dueReviews.map((rev) => (
+              <div
+                key={rev.topicId}
+                className="bg-[#0B0F19] border border-slate-800 rounded-lg p-3 flex items-center justify-between gap-2"
+              >
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-slate-200 truncate">{rev.topicName}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Streak: {rev.consecutiveSuccessCount} · {formatTimeUntilDue(rev.nextReviewDueAt)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => onStartSpacedReview(rev.topicId)}
+                  className="px-2.5 py-1 rounded bg-indigo-950 hover:bg-indigo-900 text-indigo-300 text-xs font-medium border border-indigo-800/50 shrink-0"
+                >
+                  Review
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Main Content Grid: Priority Revision & Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2 spans): Topics Needing Revision or Getting Started */}
+        {/* Left Column (2 spans): Topics Needing Revision */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <div>

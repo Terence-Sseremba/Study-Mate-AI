@@ -154,3 +154,29 @@ export function setStoredTutorPreferences(
     return false;
   }
 }
+
+const STORAGE_KEY_REVIEW_RECORDS = 'studymate_review_records_v1';
+
+export function getStoredReviewRecords(): import('../types').ReviewRecord[] {
+  if (!isStorageAvailable()) return [];
+  try {
+    const data = window.localStorage.getItem(STORAGE_KEY_REVIEW_RECORDS);
+    if (!data) return [];
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setStoredReviewRecords(
+  records: import('../types').ReviewRecord[]
+): boolean {
+  if (!isStorageAvailable()) return false;
+  try {
+    window.localStorage.setItem(STORAGE_KEY_REVIEW_RECORDS, JSON.stringify(records));
+    return true;
+  } catch {
+    return false;
+  }
+}

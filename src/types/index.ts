@@ -114,6 +114,33 @@ export interface QuizAttempt {
   isDemoSample?: boolean;
 }
 
+export type PracticeMethod =
+  | 'active_recall'
+  | 'concept_explanation'
+  | 'mixed_practice'
+  | 'spaced_review';
+
+export interface ReviewRecord {
+  topicId: string;
+  topicName: string;
+  materialId?: string;
+  materialTitle?: string;
+  sourceReference?: {
+    materialTitle: string;
+    pageOrSlideNumber: number;
+    quoteExcerpt?: string;
+  };
+  lastReviewedAt: string;
+  nextReviewDueAt: string;
+  consecutiveSuccessCount: number;
+  totalAttempts: number;
+  correctAttempts: number;
+  lastScorePercentage: number;
+  lastResult: 'pass' | 'fail';
+  intervalDays?: number;
+  easeFactor?: number;
+}
+
 export type MasteryStatus = 'mastered' | 'in_progress' | 'review_needed' | 'untested';
 
 export interface TopicMastery {

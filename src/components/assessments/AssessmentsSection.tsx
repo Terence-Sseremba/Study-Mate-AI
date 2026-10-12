@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Award,
   CheckCircle2,
@@ -10,7 +10,10 @@ import {
   Check,
   Info,
   PlusCircle,
-  Layers,
+  Clock,
+  Calendar,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import type {
   QuizQuestion,
@@ -18,141 +21,174 @@ import type {
   DifficultyLevel,
   StudyMaterial,
   SourceCitation,
-} from '../../types';
+  PracticeMethod,
+  ReviewRecord,
+} from '../../types/index.ts';
+import {
+  getDueReviews,
+  formatTimeUntilDue,
+} from '../../lib/spacedRepetition.ts';
 
 interface AssessmentsSectionProps {
   questions: QuizQuestion[];
   materials: StudyMaterial[];
+  reviewRecords: ReviewRecord[];
   onCompleteQuiz: (attempt: QuizAttempt) => void;
   onOpenCitationModal: (citation: SourceCitation) => void;
   onReviseTopicInTutor: (topicName: string) => void;
   onNavigateToMaterials?: () => void;
   preselectedTopicId?: string;
+  preselectedPracticeMethod?: PracticeMethod;
 }
-
-// Foundational diagnostic questions on evidence-based study techniques available before file upload
-const FOUNDATIONAL_STUDY_QUESTIONS: QuizQuestion[] = [
-  {
-    id: 'study-q1',
-    topicId: 'topic-active-recall',
-    topicName: 'Active Recall & Retrieval Practice',
-    questionText:
-      'According to cognitive learning science, why is active retrieval practice more effective than passive re-reading of textbooks and lecture notes?',
-    options: [
-      'It creates stronger neural memory consolidation and diagnostic calibration of knowledge gaps',
-      'It reduces total study time by eliminating the need to take notes',
-      'It converts short-term memories immediately into permanent procedural memory',
-      'It bypasses the hippocampus and stores data directly in the prefrontal cortex',
-    ],
-    correctOptionIndex: 0,
-    explanation:
-      'Retrieval practice forces the brain to reconstruct memory traces, strengthening synaptic connections and revealing exactly which concepts are not yet mastered.',
-    difficulty: 'foundational',
-    sourceReference: {
-      materialTitle: 'Cognitive Learning Principles',
-      pageOrSlideNumber: 1,
-      quoteExcerpt:
-        'Retrieval practice directly modifies memory representation, making knowledge more accessible in future recall contexts.',
-    },
-  },
-  {
-    id: 'study-q2',
-    topicId: 'topic-spaced-repetition',
-    topicName: 'Spaced Repetition & Forgetting Curve',
-    questionText:
-      'Under the Ebbinghaus forgetting curve model, when is the optimal interval to review newly learned course material?',
-    options: [
-      'Just before the memory trace is completely forgotten, resetting the decay curve at a shallower slope',
-      'Every 15 minutes continuously during a single study session',
-      'Only on the night before the final exam to maximize recency bias',
-      'Immediately after waking up regardless of when it was first learned',
-    ],
-    correctOptionIndex: 0,
-    explanation:
-      'Reviewing material just as forgetting begins forces effortful retrieval, which flattens the decay curve and promotes long-term retention.',
-    difficulty: 'intermediate',
-    sourceReference: {
-      materialTitle: 'Cognitive Learning Principles',
-      pageOrSlideNumber: 3,
-      quoteExcerpt:
-        'Effortful retrieval at expanding temporal intervals significantly impedes the rate of subsequent memory decay.',
-    },
-  },
-  {
-    id: 'study-q3',
-    topicId: 'topic-feynman-technique',
-    topicName: 'Feynman Technique & Conceptual Synthesis',
-    questionText:
-      'What is the primary indicator of conceptual mastery when applying the Feynman Technique to course topics?',
-    options: [
-      'The ability to explain the core concept in simple, jargon-free language to a novice without consulting notes',
-      'The speed at which you can transcribe verbatim textbook definitions',
-      'Memorizing mathematical equations without needing to understand underlying assumptions',
-      'Highlighting more than 70% of a textbook chapter',
-    ],
-    correctOptionIndex: 0,
-    explanation:
-      'The Feynman Technique relies on explaining complex concepts in simple terms; difficulties in doing so immediately pinpoint gaps in fundamental understanding.',
-    difficulty: 'intermediate',
-    sourceReference: {
-      materialTitle: 'Cognitive Learning Principles',
-      pageOrSlideNumber: 5,
-      quoteExcerpt:
-        'If you cannot explain a concept in simple, precise language, you have identified the precise boundary of your current comprehension.',
-    },
-  },
-];
 
 export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
   questions: propQuestions,
   materials,
+  reviewRecords,
   onCompleteQuiz,
   onOpenCitationModal,
   onReviseTopicInTutor,
   onNavigateToMaterials,
   preselectedTopicId,
+  preselectedPracticeMethod = 'active_recall',
 }) => {
-  // Dynamically derive questions from uploaded materials if available
-  const availableQuestions = useMemo(() => {
-    if (materials.length > 0) {
-      const derived: QuizQuestion[] = [];
-      materials.forEach((mat) => {
-        (mat.chunks || []).forEach((chunk, cIdx) => {
-          derived.push({
-            id: `q-${chunk.id}`,
-            topicId: `topic-${mat.id}`,
-            topicName: mat.title,
-            questionText: `Based on ${chunk.sectionHeading} in "${mat.title}", which statement correctly represents the core concept on page/slide ${chunk.pageOrSlideNumber}?`,
-            options: [
-              `Correct: ${chunk.extractedText.slice(0, 110)}...`,
-              `Incorrect alternative hypothesis regarding ${chunk.sectionHeading}`,
-              `Inverted condition that contradicts page ${chunk.pageOrSlideNumber}`,
-              `Unrelated concept not found in ${mat.title}`,
-            ],
-            correctOptionIndex: 0,
-            explanation: `Verified directly from page/slide ${chunk.pageOrSlideNumber} of ${mat.title}: "${chunk.extractedText}"`,
-            difficulty: cIdx % 2 === 0 ? 'foundational' : 'intermediate',
-            sourceReference: {
-              materialTitle: mat.title,
-              pageOrSlideNumber: chunk.pageOrSlideNumber,
-              quoteExcerpt: chunk.extractedText.slice(0, 120),
-            },
-          });
-        });
-      });
-      return derived.length > 0 ? derived : propQuestions;
-    }
-    // If no materials, use foundational diagnostic
-    return FOUNDATIONAL_STUDY_QUESTIONS;
-  }, [materials, propQuestions]);
+  // Practice Method state
+  const [practiceMethod, setPracticeMethod] = useState<PracticeMethod>(preselectedPracticeMethod);
 
-  // State for setup vs taking quiz
-  const [inQuizMode, setInQuizMode] = useState(false);
-  const [selectedTopic, setSelectedTopic] = useState<string>(preselectedTopicId || 'all');
+  // Real curriculum topics derived ONLY from genuine processed materials
+  const availableTopics = useMemo(() => {
+    return materials.map((mat) => ({
+      id: mat.id,
+      name: mat.title,
+      courseCode: mat.courseCode,
+      chunksCount: mat.chunks?.length || 0,
+      material: mat,
+    }));
+  }, [materials]);
+
+  // Selected topic: default to 'all' only when topics exist, otherwise empty
+  const [selectedTopic, setSelectedTopic] = useState<string>(() => {
+    if (preselectedTopicId && availableTopics.some((t) => t.id === preselectedTopicId)) {
+      return preselectedTopicId;
+    }
+    return availableTopics.length > 0 ? 'all' : '';
+  });
+
+  useEffect(() => {
+    if (preselectedTopicId && availableTopics.some((t) => t.id === preselectedTopicId)) {
+      setSelectedTopic(preselectedTopicId);
+    } else if (availableTopics.length > 0 && !selectedTopic) {
+      setSelectedTopic('all');
+    } else if (availableTopics.length === 0) {
+      setSelectedTopic('');
+    }
+  }, [preselectedTopicId, availableTopics]);
+
+  useEffect(() => {
+    if (preselectedPracticeMethod) {
+      setPracticeMethod(preselectedPracticeMethod);
+    }
+  }, [preselectedPracticeMethod]);
+
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLevel | 'all'>('all');
   const [questionCount, setQuestionCount] = useState<number>(3);
 
+  // Spaced review due calculation
+  const dueReviews = useMemo(() => {
+    return getDueReviews(reviewRecords);
+  }, [reviewRecords]);
+
+  // Generate questions strictly from the selected real course materials
+  const eligibleQuestions = useMemo(() => {
+    if (materials.length === 0) {
+      return [];
+    }
+
+    let targetMaterials = materials;
+
+    // If Spaced Review is selected, filter materials to those corresponding to due review records
+    if (practiceMethod === 'spaced_review') {
+      const dueTopicIds = new Set(dueReviews.map((r) => r.topicId));
+      targetMaterials = materials.filter((m) => dueTopicIds.has(m.id));
+      if (targetMaterials.length === 0) {
+        return [];
+      }
+    } else if (selectedTopic && selectedTopic !== 'all') {
+      targetMaterials = materials.filter((m) => m.id === selectedTopic);
+    }
+
+    const generated: QuizQuestion[] = [];
+
+    targetMaterials.forEach((mat) => {
+      (mat.chunks || []).forEach((chunk, cIdx) => {
+        let questionPrompt = '';
+        let excerptText = chunk.extractedText.trim();
+        if (excerptText.length > 140) excerptText = excerptText.slice(0, 140) + '...';
+
+        let distractor1 = '';
+        let distractor2 = '';
+        let distractor3 = '';
+
+        if (practiceMethod === 'concept_explanation') {
+          questionPrompt = `Concept Explanation (Feynman Technique): In your own words, which statement best explains the mechanism and significance of "${chunk.sectionHeading}" from "${mat.title}" (Page/Slide ${chunk.pageOrSlideNumber})?`;
+          distractor1 = `It inverts the primary mechanism of ${chunk.sectionHeading}, assuming opposite preconditions.`;
+          distractor2 = `It treats ${chunk.sectionHeading} as an unverified approximation that disregards course validation rules.`;
+          distractor3 = `A broad external concept not supported by the syllabus text of ${mat.title}.`;
+        } else if (practiceMethod === 'active_recall') {
+          questionPrompt = `Active Recall: What is the primary definition or key invariant established in "${chunk.sectionHeading}" on Page/Slide ${chunk.pageOrSlideNumber} of "${mat.title}"?`;
+          distractor1 = `A conflicting definition that inverts the critical constraints of ${chunk.sectionHeading}.`;
+          distractor2 = `An uncommitted transition that violates the invariants documented on page ${chunk.pageOrSlideNumber}.`;
+          distractor3 = `A secondary hypothesis omitted from the verified text of ${mat.title}.`;
+        } else {
+          // mixed_practice: alternate between recall and conceptual explanation
+          if (cIdx % 2 === 0) {
+            questionPrompt = `Active Recall: What primary invariant is defined in "${chunk.sectionHeading}" (Page/Slide ${chunk.pageOrSlideNumber} of "${mat.title}")?`;
+            distractor1 = `An alternative formulation where the invariants in ${chunk.sectionHeading} are omitted.`;
+            distractor2 = `An uncommitted transition that bypasses the validation rules on page ${chunk.pageOrSlideNumber}.`;
+            distractor3 = `A secondary hypothesis unrelated to the core text of ${mat.title}.`;
+          } else {
+            questionPrompt = `Concept Explanation: How does "${chunk.sectionHeading}" function within "${mat.title}" (Page/Slide ${chunk.pageOrSlideNumber})?`;
+            distractor1 = `It bypasses safety requirements when operating under normal parameters.`;
+            distractor2 = `It reverses the causal order of operations detailed in section ${chunk.sectionHeading}.`;
+            distractor3 = `It applies an external heuristic that conflicts with the findings on page ${chunk.pageOrSlideNumber}.`;
+          }
+        }
+
+        const correctIdx = cIdx % 4;
+        const distractors = [distractor1, distractor2, distractor3];
+        const options: string[] = [];
+        let dIdx = 0;
+        for (let i = 0; i < 4; i++) {
+          if (i === correctIdx) {
+            options.push(excerptText);
+          } else {
+            options.push(distractors[dIdx++]);
+          }
+        }
+
+        generated.push({
+          id: `q-${chunk.id}-${practiceMethod}`,
+          topicId: mat.id,
+          topicName: mat.title,
+          questionText: questionPrompt,
+          options,
+          correctOptionIndex: correctIdx,
+          explanation: `Verified directly from Page/Slide ${chunk.pageOrSlideNumber} of "${mat.title}": "${chunk.extractedText}"`,
+          difficulty: cIdx % 2 === 0 ? 'intermediate' : 'foundational',
+          sourceReference: {
+            materialTitle: mat.title,
+            pageOrSlideNumber: chunk.pageOrSlideNumber,
+            quoteExcerpt: chunk.extractedText.slice(0, 130),
+          },
+        });
+      });
+    });
+
+    return generated;
+  }, [materials, selectedTopic, practiceMethod, dueReviews]);
+
   // Active quiz state
+  const [inQuizMode, setInQuizMode] = useState(false);
   const [activeQuestions, setActiveQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -161,27 +197,35 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
   const [quizFinished, setQuizFinished] = useState(false);
   const [isMasteryRecorded, setIsMasteryRecorded] = useState(false);
 
-  // Topics available in question pool
-  const uniqueTopics = useMemo(() => {
-    return Array.from(
-      new Set(availableQuestions.map((q) => JSON.stringify({ id: q.topicId, name: q.topicName })))
-    ).map((s) => JSON.parse(s) as { id: string; name: string });
-  }, [availableQuestions]);
+  // Check if assessment can begin
+  const canBeginAssessment = useMemo(() => {
+    if (materials.length === 0) return false;
+    if (practiceMethod === 'spaced_review' && dueReviews.length === 0) return false;
+    return eligibleQuestions.length > 0;
+  }, [materials.length, practiceMethod, dueReviews.length, eligibleQuestions.length]);
+
+  const disabledReason = useMemo(() => {
+    if (materials.length === 0) {
+      return 'No course materials available. Upload course slides or PDFs to index curriculum topics.';
+    }
+    if (practiceMethod === 'spaced_review' && dueReviews.length === 0) {
+      return 'No spaced reviews are currently due. Complete an initial assessment using Active Recall or Mixed Practice to schedule reviews.';
+    }
+    if (eligibleQuestions.length === 0) {
+      return 'No questions match the current selection. Please adjust your topic filter.';
+    }
+    return '';
+  }, [materials.length, practiceMethod, dueReviews.length, eligibleQuestions.length]);
 
   const startQuiz = () => {
-    let pool = [...availableQuestions];
-    if (selectedTopic !== 'all') {
-      pool = pool.filter((q) => q.topicId === selectedTopic);
-    }
+    if (!canBeginAssessment) return;
+
+    let pool = [...eligibleQuestions];
     if (selectedDifficulty !== 'all') {
-      pool = pool.filter((q) => q.difficulty === selectedDifficulty);
+      const filtered = pool.filter((q) => q.difficulty === selectedDifficulty);
+      if (filtered.length > 0) pool = filtered;
     }
 
-    if (pool.length === 0) {
-      pool = [...availableQuestions];
-    }
-
-    // Shuffle and pick requested count
     const chosen = pool.slice(0, Math.min(questionCount, pool.length));
     setActiveQuestions(chosen);
     setCurrentIndex(0);
@@ -215,7 +259,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
     }
   };
 
-  // Calculate score
+  // Score calculation
   const correctCount = activeQuestions.reduce((acc, q) => {
     return userAnswers[q.id] === q.correctOptionIndex ? acc + 1 : acc;
   }, 0);
@@ -225,12 +269,15 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
   const handleRecordMastery = () => {
     if (isMasteryRecorded) return;
 
-    const currentTopicObj = uniqueTopics.find((t) => t.id === selectedTopic);
+    const currentTopicObj = availableTopics.find((t) => t.id === selectedTopic);
     const attempt: QuizAttempt = {
       id: `attempt-${Date.now()}`,
-      quizTitle: currentTopicObj ? `Assessment: ${currentTopicObj.name}` : 'Curriculum Diagnostic',
-      topicId: selectedTopic === 'all' ? (activeQuestions[0]?.topicId || 'topic-general') : selectedTopic,
-      topicName: currentTopicObj?.name || activeQuestions[0]?.topicName || 'General Curriculum',
+      quizTitle:
+        practiceMethod === 'spaced_review'
+          ? `Spaced Review: ${currentTopicObj?.name || 'Due Topics'}`
+          : `Assessment: ${currentTopicObj?.name || 'Curriculum Check'}`,
+      topicId: selectedTopic && selectedTopic !== 'all' ? selectedTopic : (activeQuestions[0]?.topicId || 'general'),
+      topicName: currentTopicObj?.name || activeQuestions[0]?.topicName || 'Curriculum Topics',
       difficulty: selectedDifficulty === 'all' ? 'intermediate' : selectedDifficulty,
       totalQuestions: activeQuestions.length,
       score: correctCount,
@@ -247,6 +294,46 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
 
   const currentQ = activeQuestions[currentIndex];
 
+  const handleStartDueReviews = () => {
+    if (dueReviews.length === 0) return;
+    const firstDue = dueReviews[0];
+    if (firstDue && availableTopics.some((t) => t.id === firstDue.topicId)) {
+      setSelectedTopic(firstDue.topicId);
+    } else {
+      setSelectedTopic('all');
+    }
+    setPracticeMethod('active_recall');
+    // Start quiz immediately with due review questions
+    setTimeout(() => {
+      startQuiz();
+    }, 50);
+  };
+
+  const practiceMethodOptions: Array<{
+    id: PracticeMethod;
+    title: string;
+    description: string;
+  }> = [
+    {
+      id: 'active_recall',
+      title: 'Active Recall',
+      description:
+        'Ask questions that require the student to retrieve knowledge from memory before seeing the answer.',
+    },
+    {
+      id: 'concept_explanation',
+      title: 'Concept Explanation',
+      description:
+        'Ask the student to explain a concept in their own words, using a Feynman-style learning activity.',
+    },
+    {
+      id: 'mixed_practice',
+      title: 'Mixed Practice',
+      description:
+        'Combine recall questions, concept explanations, and application problems.',
+    },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -254,57 +341,232 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-100">Adaptive Assessments</h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            {materials.length > 0
-              ? 'Topic-specific diagnostic quizzes grounded directly in your uploaded course materials.'
-              : 'Test your understanding and calibrate your topic mastery curve with diagnostic questions.'}
+            Configure practice sessions and spaced repetition reviews grounded in your course materials.
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="font-mono text-slate-200 font-bold">{availableQuestions.length}</span>
-          <span>questions available</span>
+          <span className="font-mono text-slate-200 font-bold">{availableTopics.length}</span>
+          <span>curriculum topics indexed</span>
+          <span aria-hidden="true" className="text-slate-600">·</span>
+          <span className="font-mono text-indigo-400">{dueReviews.length} reviews due</span>
         </div>
       </div>
 
       {/* QUIZ SETUP VIEW */}
       {!inQuizMode && (
         <div className="space-y-6">
-          <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-6 space-y-6">
-            <div className="flex items-center gap-3 pb-4 border-b border-slate-800">
-              <div className="p-2 rounded-lg bg-indigo-950/70 border border-indigo-800/40 text-indigo-400">
-                <Award className="w-5 h-5" />
+          {/* Spaced Repetition Due Reviews Banner / Status */}
+          {dueReviews.length > 0 ? (
+            <div className="bg-gradient-to-r from-indigo-950/90 to-[#131B2E] border border-indigo-700/60 rounded-xl p-5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-lg bg-indigo-600/30 text-indigo-400 border border-indigo-500/40">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                      <span>Spaced Repetition Reviews Ready</span>
+                      <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-indigo-600 text-white">
+                        {dueReviews.length} Due Today
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-300">
+                      Interval schedule active (1d → 3d → 7d → 14d → 30d). Reviewing now reinforces memory retention before forgetting occurs.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleStartDueReviews}
+                  disabled={materials.length === 0}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Review Spaced Repetition Due Topics ({dueReviews.length})</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
               </div>
-              <div>
-                <h2 className="text-sm font-semibold text-slate-100">Configure Study Assessment</h2>
-                <p className="text-xs text-slate-400">
-                  Select a topic to test your recall and update your mastery profile.
-                </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2 border-t border-indigo-900/50">
+                {dueReviews.map((rev) => (
+                  <div
+                    key={rev.topicId}
+                    className="bg-[#0B0F19]/80 border border-indigo-900/40 rounded-lg p-2.5 flex items-center justify-between text-xs"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="font-medium text-slate-200 truncate">{rev.topicName}</div>
+                      <div className="text-[11px] text-indigo-400">
+                        Streak: {rev.consecutiveSuccessCount} · {formatTimeUntilDue(rev.nextReviewDueAt)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTopic(rev.topicId);
+                        setPracticeMethod('active_recall');
+                      }}
+                      className="px-2 py-1 rounded bg-indigo-900/80 hover:bg-indigo-800 text-indigo-200 text-[11px] font-medium border border-indigo-700/50 shrink-0"
+                    >
+                      Target Topic
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
+                  <Clock className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-200 flex items-center gap-2">
+                    <span>Spaced Repetition Schedule</span>
+                    <span className="text-[11px] text-emerald-400 font-mono">All reviews up to date</span>
+                  </div>
+                  <p className="text-slate-400 text-[11px]">
+                    {reviewRecords.length === 0
+                      ? 'Complete an assessment using Active Recall or Concept Explanation to schedule your first review interval.'
+                      : 'No topics are currently due. Topics advance across 1d → 3d → 7d → 14d → 30d intervals as you answer accurately.'}
+                  </p>
+                </div>
+              </div>
+              {reviewRecords.length > 0 && (
+                <div className="text-right text-[11px] text-slate-400 font-mono shrink-0">
+                  <span>{reviewRecords.length} topic{reviewRecords.length === 1 ? '' : 's'} in memory schedule</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Assessment Configuration Form */}
+          <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-6 space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-indigo-950/70 border border-indigo-800/40 text-indigo-400">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-100">
+                    Assessment Configuration
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Select your curriculum topic, practice method, and question depth.
+                  </p>
+                </div>
+              </div>
+
+              {/* Spaced Review Due Quick Status */}
+              {dueReviews.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-xs">
+                  <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>
+                    <strong className="font-mono">{dueReviews.length}</strong> Due Today
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* SEPARATE CONTROL 1: Target Curriculum Topic */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                <span>Target Curriculum Topic</span>
+                <span className="text-[11px] text-slate-400 font-normal">Course Knowledge</span>
+              </label>
+
+              {availableTopics.length === 0 ? (
+                /* Empty state when knowledge base has no course materials */
+                <div className="bg-[#0B0F19] border border-slate-800 rounded-lg p-4 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400" />
+                      No topics available yet
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      0 materials indexed
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Upload and process course materials before selecting a curriculum topic.
+                    StudyMate AI derives all assessment questions strictly from your indexed slides and textbooks.
+                  </p>
+                  {onNavigateToMaterials && (
+                    <button
+                      type="button"
+                      onClick={onNavigateToMaterials}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1.5 transition-colors pt-1"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      <span>Upload your course materials in Study Materials →</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                /* Real curriculum topics from uploaded materials */
+                <div className="space-y-1">
+                  <select
+                    value={selectedTopic}
+                    onChange={(e) => setSelectedTopic(e.target.value)}
+                    className="w-full bg-[#0B0F19] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  >
+                    <option value="all">
+                      All available topics ({availableTopics.length} topics)
+                    </option>
+                    {availableTopics.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        [{t.courseCode}] {t.name} ({t.chunksCount} chunks indexed)
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-400">
+                    Questions are traceable to specific pages and slides in your uploaded files.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* SEPARATE CONTROL 2: Practice Method */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                <span>Practice Method</span>
+                <span className="text-[11px] text-slate-400 font-normal">Learning Technique</span>
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {practiceMethodOptions.map((method) => {
+                  const isSelected = practiceMethod === method.id;
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setPracticeMethod(method.id)}
+                      className={`text-left p-3.5 rounded-lg border transition-all flex flex-col justify-between space-y-2 ${
+                        isSelected
+                          ? 'bg-indigo-950/70 border-indigo-600 text-slate-100 shadow-sm'
+                          : 'bg-[#0B0F19] border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-semibold text-xs text-slate-100 flex items-center gap-1.5">
+                          {method.title}
+                        </span>
+                        {isSelected && (
+                          <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-normal">
+                        {method.description}
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Topic Selector */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300">Target Curriculum Topic</label>
-                <select
-                  value={selectedTopic}
-                  onChange={(e) => setSelectedTopic(e.target.value)}
-                  className="w-full bg-[#0B0F19] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus-visible:ring-2 focus-visible:ring-indigo-500"
-                >
-                  <option value="all">All Topics ({availableQuestions.length} questions)</option>
-                  {uniqueTopics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-400">
-                  {materials.length > 0
-                    ? 'Questions generated from your uploaded document chunks.'
-                    : 'Foundational study strategy diagnostic pool.'}
-                </p>
-              </div>
-
-              {/* Difficulty */}
+            {/* CONTROLS 3 & 4: Difficulty and Question Count */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-2 border-t border-slate-800/80">
+              {/* Difficulty Level */}
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300">Difficulty Level</label>
                 <select
@@ -315,12 +577,10 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
                   className="w-full bg-[#0B0F19] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus-visible:ring-2 focus-visible:ring-indigo-500"
                 >
                   <option value="all">Adaptive (All Levels)</option>
-                  <option value="foundational">Foundational</option>
+                  <option value="foundational">Beginner / Foundational</option>
                   <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
                 </select>
-                <p className="text-[11px] text-slate-400">
-                  Calibrated to test both conceptual recall and application.
-                </p>
               </div>
 
               {/* Question Count */}
@@ -342,50 +602,91 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
                     </button>
                   ))}
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  Estimated duration: ~{questionCount * 1.5} minutes
-                </p>
               </div>
             </div>
 
-            {/* Launch CTA */}
-            <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* Assessment Configuration Summary Box */}
+            <div className="p-3.5 rounded-lg bg-[#0B0F19] border border-slate-800 text-xs space-y-2">
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Configuration Summary
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div>
+                  <span className="text-slate-500 block">Topic:</span>
+                  <span className="text-slate-200 font-medium truncate block">
+                    {availableTopics.length === 0
+                      ? 'None available'
+                      : selectedTopic === 'all'
+                      ? 'All available topics'
+                      : availableTopics.find((t) => t.id === selectedTopic)?.name || 'Selected Topic'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Method:</span>
+                  <span className="text-indigo-300 font-medium capitalize">
+                    {practiceMethod.replace('_', ' ')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Difficulty:</span>
+                  <span className="text-slate-200 font-medium capitalize">{selectedDifficulty}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Questions:</span>
+                  <span className="text-slate-200 font-medium font-mono">{questionCount} questions</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Launch CTA or Disabled Feedback */}
+            <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2 text-xs text-slate-400">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Every answer provides conceptual explanations upon submission</span>
-              </div>
-
-              <button
-                onClick={startQuiz}
-                className="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-2 focus-visible:ring-2 focus-visible:ring-indigo-400"
-              >
-                <span>Begin Assessment</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Zero Materials Helper Notice */}
-          {materials.length === 0 && (
-            <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4 flex items-start gap-3 text-xs text-slate-400">
-              <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <span className="font-medium text-slate-300">Upload Materials for Custom Course Quizzes:</span>
-                <p>
-                  You are currently viewing foundational learning science questions. Once you upload your course slide decks or textbook PDFs in <strong>Study Materials</strong>, StudyMate AI will automatically generate quizzes tailored to your specific curriculum.
-                </p>
-                {onNavigateToMaterials && (
-                  <button
-                    onClick={onNavigateToMaterials}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 pt-1"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                    <span>Upload your course materials now</span>
-                  </button>
+                {canBeginAssessment ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Configuration valid · Questions ready to launch</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="text-amber-400/90">{disabledReason}</span>
+                  </>
                 )}
               </div>
+
+              {canBeginAssessment ? (
+                <button
+                  type="button"
+                  onClick={startQuiz}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-2 focus-visible:ring-2 focus-visible:ring-indigo-400"
+                >
+                  <span>Begin Assessment</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  {materials.length === 0 && onNavigateToMaterials ? (
+                    <button
+                      type="button"
+                      onClick={onNavigateToMaterials}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-2"
+                    >
+                      <PlusCircle className="w-4 h-4 text-indigo-400" />
+                      <span>Upload Course Materials</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full sm:w-auto px-6 py-2.5 bg-slate-800 text-slate-500 cursor-not-allowed rounded-lg text-xs font-semibold"
+                    >
+                      Begin Assessment
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -400,6 +701,8 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
               </span>
               <span aria-hidden="true" className="text-slate-600">·</span>
               <span className="text-indigo-400 font-mono">{currentQ.topicName}</span>
+              <span aria-hidden="true" className="text-slate-600">·</span>
+              <span className="text-slate-400 capitalize">{practiceMethod.replace('_', ' ')}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="capitalize text-slate-400 text-[11px] font-mono">
@@ -476,7 +779,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
             })}
           </div>
 
-          {/* Answer Feedback (Shown after checking) */}
+          {/* Answer Feedback */}
           {isAnswerSubmitted && (
             <div className="p-4 rounded-xl bg-[#0B0F19] border border-slate-800 space-y-3 animate-in fade-in duration-200">
               <div className="flex items-center gap-2">
@@ -512,8 +815,28 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
                     </span>
                   </div>
 
-                  <div className="text-[11px] text-slate-400 italic">
-                    "{currentQ.sourceReference.quoteExcerpt.slice(0, 75)}..."
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400 italic">
+                      "{currentQ.sourceReference.quoteExcerpt.slice(0, 60)}..."
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenCitationModal({
+                          id: `cite-${currentQ.id}`,
+                          chunkId: currentQ.id,
+                          materialId: currentQ.topicId,
+                          materialTitle: currentQ.sourceReference.materialTitle,
+                          pageOrSlideNumber: currentQ.sourceReference.pageOrSlideNumber,
+                          sectionHeading: currentQ.topicName,
+                          excerpt: currentQ.sourceReference.quoteExcerpt,
+                          relevanceScore: 0.98,
+                        });
+                      }}
+                      className="px-2 py-0.5 rounded text-[11px] text-indigo-300 hover:text-indigo-200 bg-indigo-950 hover:bg-indigo-900 border border-indigo-800/60 font-medium transition-colors"
+                    >
+                      Inspect Excerpt
+                    </button>
                   </div>
                 </div>
               )}
@@ -558,7 +881,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
             </div>
             <h2 className="text-lg font-bold text-slate-100">Assessment Completed!</h2>
             <p className="text-xs text-slate-400">
-              Evaluated against curriculum knowledge benchmarks.
+              Evaluated using <strong className="text-indigo-300 capitalize">{practiceMethod.replace('_', ' ')}</strong>.
             </p>
           </div>
 
@@ -573,28 +896,30 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
               <div className="text-xs text-slate-400">Percentage</div>
               <div
                 className={`text-2xl font-bold font-mono mt-1 ${
-                  scorePercent >= 75 ? 'text-emerald-400' : 'text-amber-400'
+                  scorePercent >= 70 ? 'text-emerald-400' : 'text-amber-400'
                 }`}
               >
                 {scorePercent}%
               </div>
             </div>
             <div className="bg-[#0B0F19] border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-400">Evidence Logged</div>
-              <div className="text-2xl font-bold font-mono text-indigo-400 mt-1">
-                +{activeQuestions.length} Points
+              <div className="text-xs text-slate-400">Spaced Interval Impact</div>
+              <div className="text-sm font-bold font-mono text-indigo-400 mt-2">
+                {scorePercent >= 70
+                  ? 'Advances to next interval'
+                  : 'Schedules 10m review retry'}
               </div>
             </div>
           </div>
 
-          {/* Real Mastery Profile Update Action */}
+          {/* Record Mastery & Spaced Schedule Action */}
           <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="space-y-0.5 text-center sm:text-left">
               <div className="text-xs font-semibold text-slate-200">
-                Record Evidence in Learning Mastery
+                Update Topic Mastery & Spaced Repetition Schedule
               </div>
               <p className="text-[11px] text-slate-400">
-                Log these {activeQuestions.length} question evaluations into your progress curve.
+                Saves your attempt and calculates the next review date (1d → 3d → 7d → 14d → 30d).
               </p>
             </div>
 
@@ -610,12 +935,12 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
               {isMasteryRecorded ? (
                 <>
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>Mastery Profile Updated</span>
+                  <span>Mastery & Spaced Schedule Updated</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  <span>Update Learning Mastery</span>
+                  <span>Update Mastery & Schedule</span>
                 </>
               )}
             </button>
@@ -635,7 +960,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
 
             <button
               onClick={() => {
-                const topicName = activeQuestions[0]?.topicName || 'Study Method';
+                const topicName = activeQuestions[0]?.topicName || 'Course Concept';
                 onReviseTopicInTutor(topicName);
               }}
               className="px-4 py-2 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-800/60 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"

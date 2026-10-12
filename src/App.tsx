@@ -28,7 +28,11 @@ import {
   setStoredMastery,
   getStoredTutorPreferences,
   setStoredTutorPreferences,
+  getStoredReviewRecords,
+  setStoredReviewRecords,
 } from './lib/storage';
+
+import { calculateNextReview } from './lib/spacedRepetition';
 
 import type {
   StudyMaterial,
@@ -39,6 +43,8 @@ import type {
   TutorMode,
   StudentProfile,
   TutorPreferences,
+  ReviewRecord,
+  PracticeMethod,
 } from './types';
 
 export default function App() {
@@ -80,6 +86,10 @@ export default function App() {
     return stored.length > 0 ? stored : INITIAL_QUIZ_ATTEMPTS;
   });
 
+  const [reviewRecords, setReviewRecords] = useState<ReviewRecord[]>(() => {
+    return getStoredReviewRecords();
+  });
+
   const [questions, setQuestions] = useState(INITIAL_QUIZ_QUESTIONS);
   const [tutorMessages, setTutorMessages] = useState<TutorMessage[]>(INITIAL_TUTOR_MESSAGES);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
@@ -93,6 +103,7 @@ export default function App() {
   const [activeMaterialFilter, setActiveMaterialFilter] = useState<string | undefined>(undefined);
   const [tutorInitialPrompt, setTutorInitialPrompt] = useState<string | undefined>(undefined);
   const [preselectedTopicId, setPreselectedTopicId] = useState<string | undefined>(undefined);
+  const [preselectedPracticeMethod, setPreselectedPracticeMethod] = useState<PracticeMethod>('active_recall');
 
   // Server API status state
   const [apiStatus, setApiStatus] = useState<{
@@ -197,6 +208,17 @@ export default function App() {
 
   const handleStartQuizForTopic = (topicId: string) => {
     setPreselectedTopicId(topicId);
+    setPreselectedPracticeMethod('active_recall');
+    setCurrentSection('assessments');
+  };
+
+  const handleStartSpacedReview = (topicId?: string) => {
+    if (topicId) {
+      setPreselectedTopicId(topicId);
+    } else {
+      setPreselectedTopicId(undefined);
+    }
+    setPreselectedPracticeMethod('active_recall');
     setCurrentSection('assessments');
   };
 
@@ -314,6 +336,25 @@ export default function App() {
     setQuizAttempts(updatedAttempts);
     setStoredAttempts(updatedAttempts);
 
+    // Dynamically calibrate spaced repetition schedule using calculateNextReview
+    const isSuccess = attempt.percentage >= 70;
+    const existingRev = reviewRecords.find((r) => r.topicId === attempt.topicId);
+    const updatedRev = calculateNextReview(existingRev, {
+      topicId: attempt.topicId,
+      topicName: attempt.topicName,
+      isSuccess,
+      scorePercentage: attempt.percentage,
+      materialId: attempt.topicId,
+      materialTitle: attempt.topicName,
+    });
+
+    const nextReviewRecords = [
+      updatedRev,
+      ...reviewRecords.filter((r) => r.topicId !== attempt.topicId),
+    ];
+    setReviewRecords(nextReviewRecords);
+    setStoredReviewRecords(nextReviewRecords);
+
     // Dynamically calibrate target topic mastery in state
     setMasteryTopics((prevTopics) => {
       const existingIdx = prevTopics.findIndex((t) => t.topicId === attempt.topicId);
@@ -390,9 +431,11 @@ export default function App() {
             materials={materials}
             masteryTopics={masteryTopics}
             recentAttempts={quizAttempts}
+            reviewRecords={reviewRecords}
             onNavigate={handleNavigate}
             onSelectTopicForTutor={handleSelectTopicForTutor}
             onStartQuizForTopic={handleStartQuizForTopic}
+            onStartSpacedReview={handleStartSpacedReview}
           />
         )}
 
@@ -427,11 +470,13 @@ export default function App() {
           <AssessmentsSection
             questions={questions}
             materials={materials}
+            reviewRecords={reviewRecords}
             onCompleteQuiz={handleCompleteQuiz}
             onOpenCitationModal={handleOpenCitation}
             onReviseTopicInTutor={handleSelectTopicForTutor}
             onNavigateToMaterials={() => handleNavigate('materials')}
             preselectedTopicId={preselectedTopicId}
+            preselectedPracticeMethod={preselectedPracticeMethod}
           />
         )}
 
@@ -439,6 +484,7 @@ export default function App() {
           <ProgressSection
             masteryTopics={masteryTopics}
             quizAttempts={quizAttempts}
+            reviewRecords={reviewRecords}
             onReviseInTutor={handleSelectTopicForTutor}
             onTakeQuizForTopic={handleStartQuizForTopic}
           />

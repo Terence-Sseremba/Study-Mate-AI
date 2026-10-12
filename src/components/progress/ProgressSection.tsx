@@ -7,11 +7,13 @@ import {
   Clock,
   PlusCircle,
 } from 'lucide-react';
-import type { TopicMastery, QuizAttempt } from '../../types';
+import type { TopicMastery, QuizAttempt, ReviewRecord } from '../../types';
+import { formatTimeUntilDue, isReviewDue } from '../../lib/spacedRepetition';
 
 interface ProgressSectionProps {
   masteryTopics: TopicMastery[];
   quizAttempts: QuizAttempt[];
+  reviewRecords?: ReviewRecord[];
   onReviseInTutor: (topicName: string) => void;
   onTakeQuizForTopic: (topicId: string) => void;
 }
@@ -19,6 +21,7 @@ interface ProgressSectionProps {
 export const ProgressSection: React.FC<ProgressSectionProps> = ({
   masteryTopics,
   quizAttempts,
+  reviewRecords = [],
   onReviseInTutor,
   onTakeQuizForTopic,
 }) => {
@@ -175,7 +178,7 @@ export const ProgressSection: React.FC<ProgressSectionProps> = ({
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
                         <span className="font-mono text-indigo-400 font-semibold">
                           {topic.courseCode}
                         </span>
@@ -199,6 +202,28 @@ export const ProgressSection: React.FC<ProgressSectionProps> = ({
                         <span className="text-slate-400 text-[11px]">
                           Last: {new Date(topic.lastPracticed).toLocaleDateString()}
                         </span>
+                        {(() => {
+                          const rev = reviewRecords.find((r) => r.topicId === topic.topicId);
+                          if (!rev) return null;
+                          const due = isReviewDue(rev);
+                          return (
+                            <>
+                              <span aria-hidden="true" className="text-slate-600">·</span>
+                              <span
+                                className={`text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                                  due
+                                    ? 'bg-rose-950/50 border-rose-800/60 text-rose-300'
+                                    : 'bg-indigo-950/50 border-indigo-800/40 text-indigo-300'
+                                }`}
+                              >
+                                <Clock className="w-2.5 h-2.5" />
+                                <span>
+                                  {due ? 'Due for Review' : formatTimeUntilDue(rev.nextReviewDueAt)} (Streak: {rev.consecutiveSuccessCount})
+                                </span>
+                              </span>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       <h3 className="text-sm font-semibold text-slate-200">{topic.topicName}</h3>
