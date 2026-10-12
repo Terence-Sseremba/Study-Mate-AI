@@ -1,0 +1,6 @@
+{
+  "name": "StudyMate AI",
+  "description": "Personalized tutoring and adaptive learning platform with source-grounded course materials, quizzes, and mastery tracking for students.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
