@@ -218,7 +218,7 @@ export default function App() {
     } else {
       setPreselectedTopicId(undefined);
     }
-    setPreselectedPracticeMethod('active_recall');
+    setPreselectedPracticeMethod('spaced_review');
     setCurrentSection('assessments');
   };
 
@@ -278,13 +278,19 @@ export default function App() {
 
       let fallbackText = '';
       if (chunk) {
+        const anchor = chunk.pageNumber
+          ? `Page ${chunk.pageNumber}`
+          : chunk.slideNumber
+          ? `Slide ${chunk.slideNumber}`
+          : chunk.anchorLabel || chunk.sectionHeading || 'Section';
+
         const approach = tutorPreferences.teachingApproach;
         if (approach === 'socratic') {
-          fallbackText = `Grounded in **${relevantMat.title}** (Page/Slide ${chunk.pageOrSlideNumber}):\n\n> "${chunk.extractedText}"\n\n**Inquiry:** How does this relate to the main problem in your course? What would change if this condition was absent?`;
+          fallbackText = `Grounded in **${relevantMat.title}** (${anchor}):\n\n> "${chunk.extractedText}"\n\n**Inquiry:** How does this relate to the main problem in your course? What would change if this condition was absent?`;
         } else if (approach === 'step_by_step') {
-          fallbackText = `### Step-by-Step Breakdown (${relevantMat.title}, Page ${chunk.pageOrSlideNumber}):\n1. **Core Concept:** Grounded in ${chunk.sectionHeading}.\n2. **Passage Excerpt:** "${chunk.extractedText}"\n3. **Application:** Verifiable under standard system parameters.`;
+          fallbackText = `### Step-by-Step Breakdown (${relevantMat.title}, ${anchor}):\n1. **Core Concept:** Grounded in ${chunk.sectionHeading}.\n2. **Passage Excerpt:** "${chunk.extractedText}"\n3. **Application:** Verifiable under standard system parameters.`;
         } else {
-          fallbackText = `**Direct Answer** (${relevantMat.title}, Page ${chunk.pageOrSlideNumber}):\n\n"${chunk.extractedText}"\n\n*Verified from your uploaded document.*`;
+          fallbackText = `**Direct Answer** (${relevantMat.title}, ${anchor}):\n\n"${chunk.extractedText}"\n\n*Verified from your uploaded document.*`;
         }
 
         if (tutorPreferences.enableKnowledgeChecks) {

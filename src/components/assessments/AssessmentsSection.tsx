@@ -109,7 +109,11 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
     // If Spaced Review is selected, filter materials to those corresponding to due review records
     if (practiceMethod === 'spaced_review') {
       const dueTopicIds = new Set(dueReviews.map((r) => r.topicId));
-      targetMaterials = materials.filter((m) => dueTopicIds.has(m.id));
+      if (selectedTopic && selectedTopic !== 'all') {
+        targetMaterials = materials.filter((m) => m.id === selectedTopic && dueTopicIds.has(m.id));
+      } else {
+        targetMaterials = materials.filter((m) => dueTopicIds.has(m.id));
+      }
       if (targetMaterials.length === 0) {
         return [];
       }
@@ -129,28 +133,39 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
         let distractor2 = '';
         let distractor3 = '';
 
-        if (practiceMethod === 'concept_explanation') {
-          questionPrompt = `Concept Explanation (Feynman Technique): In your own words, which statement best explains the mechanism and significance of "${chunk.sectionHeading}" from "${mat.title}" (Page/Slide ${chunk.pageOrSlideNumber})?`;
+        const anchorText = chunk.pageNumber
+          ? `Page ${chunk.pageNumber}`
+          : chunk.slideNumber
+          ? `Slide ${chunk.slideNumber}`
+          : chunk.anchorLabel || chunk.sectionHeading || 'Document Passage';
+
+        if (practiceMethod === 'spaced_review') {
+          questionPrompt = `Spaced Retention Check: Recall the core invariant or principle from "${chunk.sectionHeading}" in "${mat.title}" (${anchorText}):`;
+          distractor1 = `An outdated formulation where the critical constraints of ${chunk.sectionHeading} are omitted.`;
+          distractor2 = `A common misconception that inverts the operation documented in ${anchorText}.`;
+          distractor3 = `An external heuristic unsupported by the verified syllabus text of ${mat.title}.`;
+        } else if (practiceMethod === 'concept_explanation') {
+          questionPrompt = `Concept Explanation (Feynman Technique): In your own words, which statement best explains the mechanism and significance of "${chunk.sectionHeading}" from "${mat.title}" (${anchorText})?`;
           distractor1 = `It inverts the primary mechanism of ${chunk.sectionHeading}, assuming opposite preconditions.`;
           distractor2 = `It treats ${chunk.sectionHeading} as an unverified approximation that disregards course validation rules.`;
           distractor3 = `A broad external concept not supported by the syllabus text of ${mat.title}.`;
         } else if (practiceMethod === 'active_recall') {
-          questionPrompt = `Active Recall: What is the primary definition or key invariant established in "${chunk.sectionHeading}" on Page/Slide ${chunk.pageOrSlideNumber} of "${mat.title}"?`;
+          questionPrompt = `Active Recall: What is the primary definition or key invariant established in "${chunk.sectionHeading}" (${anchorText} of "${mat.title}")?`;
           distractor1 = `A conflicting definition that inverts the critical constraints of ${chunk.sectionHeading}.`;
-          distractor2 = `An uncommitted transition that violates the invariants documented on page ${chunk.pageOrSlideNumber}.`;
+          distractor2 = `An uncommitted transition that violates the invariants documented in ${anchorText}.`;
           distractor3 = `A secondary hypothesis omitted from the verified text of ${mat.title}.`;
         } else {
           // mixed_practice: alternate between recall and conceptual explanation
           if (cIdx % 2 === 0) {
-            questionPrompt = `Active Recall: What primary invariant is defined in "${chunk.sectionHeading}" (Page/Slide ${chunk.pageOrSlideNumber} of "${mat.title}")?`;
+            questionPrompt = `Active Recall: What primary invariant is defined in "${chunk.sectionHeading}" (${anchorText} of "${mat.title}")?`;
             distractor1 = `An alternative formulation where the invariants in ${chunk.sectionHeading} are omitted.`;
-            distractor2 = `An uncommitted transition that bypasses the validation rules on page ${chunk.pageOrSlideNumber}.`;
+            distractor2 = `An uncommitted transition that bypasses the validation rules in ${anchorText}.`;
             distractor3 = `A secondary hypothesis unrelated to the core text of ${mat.title}.`;
           } else {
-            questionPrompt = `Concept Explanation: How does "${chunk.sectionHeading}" function within "${mat.title}" (Page/Slide ${chunk.pageOrSlideNumber})?`;
+            questionPrompt = `Concept Explanation: How does "${chunk.sectionHeading}" function within "${mat.title}" (${anchorText})?`;
             distractor1 = `It bypasses safety requirements when operating under normal parameters.`;
             distractor2 = `It reverses the causal order of operations detailed in section ${chunk.sectionHeading}.`;
-            distractor3 = `It applies an external heuristic that conflicts with the findings on page ${chunk.pageOrSlideNumber}.`;
+            distractor3 = `It applies an external heuristic that conflicts with the findings in ${anchorText}.`;
           }
         }
 
@@ -173,7 +188,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
           questionText: questionPrompt,
           options,
           correctOptionIndex: correctIdx,
-          explanation: `Verified directly from Page/Slide ${chunk.pageOrSlideNumber} of "${mat.title}": "${chunk.extractedText}"`,
+          explanation: `Verified directly from ${anchorText} of "${mat.title}": "${chunk.extractedText}"`,
           difficulty: cIdx % 2 === 0 ? 'intermediate' : 'foundational',
           sourceReference: {
             materialTitle: mat.title,
@@ -302,7 +317,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
     } else {
       setSelectedTopic('all');
     }
-    setPracticeMethod('active_recall');
+    setPracticeMethod('spaced_review');
     // Start quiz immediately with due review questions
     setTimeout(() => {
       startQuiz();
@@ -313,6 +328,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
     id: PracticeMethod;
     title: string;
     description: string;
+    badge?: string;
   }> = [
     {
       id: 'active_recall',
@@ -330,7 +346,14 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
       id: 'mixed_practice',
       title: 'Mixed Practice',
       description:
-        'Combine recall questions, concept explanations, and application problems.',
+        'Combine recall questions, conceptual explanations, and application problems.',
+    },
+    {
+      id: 'spaced_review',
+      title: 'Spaced Review',
+      description:
+        'Practise topics that are due for review based on actual assessment history and review scheduling.',
+      badge: dueReviews.length > 0 ? `${dueReviews.length} Due` : undefined,
     },
   ];
 
@@ -533,7 +556,7 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
                 <span className="text-[11px] text-slate-400 font-normal">Learning Technique</span>
               </label>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {practiceMethodOptions.map((method) => {
                   const isSelected = practiceMethod === method.id;
                   return (
@@ -547,13 +570,20 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
                           : 'bg-[#0B0F19] border-slate-800 text-slate-300 hover:border-slate-700'
                       }`}
                     >
-                      <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center justify-between w-full gap-1">
                         <span className="font-semibold text-xs text-slate-100 flex items-center gap-1.5">
                           {method.title}
                         </span>
-                        {isSelected && (
-                          <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-                        )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {method.badge && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded bg-indigo-600 text-white">
+                              {method.badge}
+                            </span>
+                          )}
+                          {isSelected && (
+                            <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                          )}
+                        </div>
                       </div>
                       <p className="text-[11px] text-slate-400 leading-normal">
                         {method.description}
@@ -562,6 +592,30 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
                   );
                 })}
               </div>
+
+              {/* Guidance when Spaced Review is selected but no topics are due */}
+              {practiceMethod === 'spaced_review' && dueReviews.length === 0 && (
+                <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-800/50 text-xs text-indigo-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-semibold text-slate-200">No Spaced Reviews Currently Due: </span>
+                      <span className="text-slate-400">
+                        {reviewRecords.length === 0
+                          ? 'No topics are scheduled for review yet. Complete an initial assessment first using Active Recall or Mixed Practice to schedule review intervals.'
+                          : 'All your indexed topics are up to date! Reviews will appear here when their spaced retention intervals elapse.'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPracticeMethod('active_recall')}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shrink-0 transition-colors"
+                  >
+                    Switch to Active Recall
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* CONTROLS 3 & 4: Difficulty and Question Count */}
@@ -810,8 +864,11 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
                   <div className="flex items-center gap-2 text-indigo-400 font-mono text-[11px]">
                     <BookOpen className="w-3.5 h-3.5" />
                     <span>
-                      Source: {currentQ.sourceReference.materialTitle} · Page/Slide{' '}
-                      {currentQ.sourceReference.pageOrSlideNumber}
+                      Source: {currentQ.sourceReference.materialTitle} ·{' '}
+                      {currentQ.sourceReference.anchorLabel ||
+                        (currentQ.sourceReference.pageOrSlideNumber
+                          ? `Page/Slide ${currentQ.sourceReference.pageOrSlideNumber}`
+                          : 'Document Excerpt')}
                     </span>
                   </div>
 

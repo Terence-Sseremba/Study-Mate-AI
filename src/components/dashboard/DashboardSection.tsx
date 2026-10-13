@@ -51,7 +51,10 @@ export const DashboardSection: React.FC<DashboardSectionProps> = ({
 
   // Compute metrics from genuine user actions
   const totalChunks = materials.reduce((acc, m) => acc + (m.chunksCount || 0), 0);
-  const totalPages = materials.reduce((acc, m) => acc + (m.pageCount || 0), 0);
+  const totalPagesOrSlides = materials.reduce(
+    (acc, m) => acc + (m.pageCount || m.slideCount || 0),
+    0
+  );
 
   // Overall mastery is ONLY computed if topics exist with actual evidence
   const topicsWithEvidence = masteryTopics.filter((t) => t.evidenceCount > 0);
@@ -139,8 +142,12 @@ export const DashboardSection: React.FC<DashboardSectionProps> = ({
                 <span className="text-slate-400">No documents uploaded yet</span>
               ) : (
                 <>
-                  <span>{totalPages} pages/slides</span>
-                  <span aria-hidden="true">·</span>
+                  {totalPagesOrSlides > 0 && (
+                    <>
+                      <span>{totalPagesOrSlides} pages/slides</span>
+                      <span aria-hidden="true">·</span>
+                    </>
+                  )}
                   <span className="text-indigo-400 font-mono">{totalChunks} chunks</span>
                 </>
               )}

@@ -10,8 +10,14 @@ import {
   Info,
   PlusCircle,
   Sparkles,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
-import type { StudyMaterial } from '../../types';
+import type { StudyMaterial, DocumentType } from '../../types';
+import {
+  processUploadedDocument,
+  classifyUploadedFile,
+} from '../../lib/documentExtraction';
 
 interface MaterialsSectionProps {
   materials: StudyMaterial[];
@@ -36,77 +42,56 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
   const [processingStage, setProcessingStage] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const allowedExtensions = ['.pdf', '.pptx', '.ppt', '.txt', '.md', '.docx'];
-
   const validateAndProcessFile = async (file: File) => {
     setUploadError(null);
-    const fileName = file.name;
-    const ext = '.' + fileName.split('.').pop()?.toLowerCase();
 
-    if (!allowedExtensions.includes(ext)) {
+    // 1. Real file-type classification
+    const classification = classifyUploadedFile(file);
+    if (!classification.isSupported) {
       setUploadError(
-        `Unsupported file type "${ext}". StudyMate AI accepts PDF textbooks, PPTX lecture slides, Markdown, and TXT files.`
+        classification.unsupportedReason ||
+          `Unsupported file type "${file.name}". StudyMate AI accepts PDF (.pdf), Word (.docx), PowerPoint (.pptx), Markdown (.md), and Text (.txt).`
       );
       return;
     }
 
-    if (file.size > 30 * 1024 * 1024) {
-      setUploadError('File size exceeds the 30MB ceiling. Please select a smaller document.');
+    // 2. Empty file check
+    if (file.size === 0) {
+      setUploadError('The uploaded file is empty (0 bytes). Please upload a valid course document.');
       return;
     }
 
-    // Extraction pipeline simulation
+    // 3. File size ceiling (30MB)
+    if (file.size > 30 * 1024 * 1024) {
+      setUploadError(
+        `File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 30MB limit. Please upload a smaller document.`
+      );
+      return;
+    }
+
+    // 4. Real extraction pipeline
     setIsProcessing(true);
-    setProcessingStage('Reading document binary stream...');
+    setProcessingStage('Reading binary document...');
 
-    setTimeout(() => {
-      setProcessingStage('Multimodal layout parser: segmenting slides & pages...');
-    }, 600);
-
-    setTimeout(() => {
-      setProcessingStage('Chunking semantic paragraphs & anchoring page numbers...');
-    }, 1200);
-
-    setTimeout(() => {
-      const isSlides = ext.includes('ppt');
-      const estimatedPages = isSlides ? 20 : Math.max(6, Math.floor(file.size / (120 * 1024)));
-      const simulatedChunksCount = Math.max(3, Math.floor(estimatedPages / 4));
-
-      const cleanDocTitle = fileName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
-
-      // Extract text content if it's a text/markdown file, or synthesize anchored chunks based on the user's document
-      const sampleChunks = Array.from({ length: simulatedChunksCount }).map((_, idx) => ({
-        id: `chunk-${Date.now()}-${idx + 1}`,
-        materialId: `mat-${Date.now()}`,
-        materialTitle: cleanDocTitle,
-        pageOrSlideNumber: (idx + 1) * 2,
-        sectionHeading: `Section ${idx + 1}: ${cleanDocTitle} Key Excerpt`,
-        extractedText: `Extracted passage from page ${(idx + 1) * 2} of ${fileName}. Contains primary definitions, core equations, and verified course concepts grounded in this uploaded document.`,
-        tokenEstimate: 68,
-        confidenceScore: 0.98,
-      }));
-
-      const newMaterial: StudyMaterial = {
-        id: `mat-${Date.now()}`,
-        title: cleanDocTitle,
-        filename: fileName,
-        fileType: isSlides ? 'slides' : 'pdf',
-        fileSizeFormatted: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-        pageCount: estimatedPages,
-        chunksCount: simulatedChunksCount,
-        uploadedAt: new Date().toISOString(),
-        courseCode: 'COURSE',
-        courseName: 'Course Documents',
-        processingStatus: 'indexed',
-        statusMessage: `${simulatedChunksCount} semantic chunks indexed with exact page anchors.`,
-        chunks: sampleChunks,
-        isDemoSample: false,
-      };
+    try {
+      const newMaterial = await processUploadedDocument(file, (stage) => {
+        setProcessingStage(stage);
+      });
 
       onAddMaterial(newMaterial);
+      setUploadError(null);
+    } catch (err: any) {
+      console.error('Document processing error:', err);
+      setUploadError(
+        err?.message || 'Failed to extract text from document. Please verify the file is not corrupted.'
+      );
+    } finally {
       setIsProcessing(false);
       setProcessingStage('');
-    }, 1900);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -167,7 +152,7 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.pptx,.ppt,.txt,.md,.docx"
+          accept=".pdf,.docx,.pptx,.ppt,.txt,.md,.markdown"
           className="hidden"
           onChange={handleFileChange}
         />
@@ -176,13 +161,13 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
           <div className="py-4 space-y-3">
             <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
             <div className="text-sm font-semibold text-slate-200">
-              Processing Document & Anchoring Chunks
+              Processing Document & Extracting Passages
             </div>
             <p className="text-xs text-indigo-400 font-mono animate-pulse">
               {processingStage}
             </p>
             <p className="text-[11px] text-slate-400">
-              Parsing page boundaries and generating grounding index...
+              Performing genuine text extraction and anchoring source locations...
             </p>
           </div>
         ) : (
@@ -201,7 +186,7 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
               <span className="text-sm text-slate-300">or drag & drop your course documents here</span>
             </div>
             <p className="text-xs text-slate-400">
-              Supported formats: PDF textbooks, PPTX lecture slide decks, Markdown, TXT (up to 30MB)
+              Supported formats: PDF (.pdf), Word (.docx), PowerPoint (.pptx), Markdown (.md), Plain Text (.txt) — up to 30MB
             </p>
           </div>
         )}
@@ -220,7 +205,7 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
         <div className="space-y-0.5">
           <span className="font-medium text-slate-300">Verifiable Grounding Guarantee:</span>
           <p>
-            You can click <strong className="text-slate-200">"Inspect Chunks"</strong> on any material to read the verbatim text passages, page numbers, and slide anchors extracted from that document. The tutor never invents page citations.
+            Click <strong className="text-slate-200">"Inspect Chunks"</strong> on any material to read the verbatim text passages, page numbers, and slide anchors extracted from your uploaded file. Grounding only cites text actually present in your document.
           </p>
         </div>
       </div>
@@ -237,8 +222,8 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
               No study materials uploaded yet
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-              Upload your lecture slides (PDF/PPTX), textbook chapters, or course notes to build your grounded knowledge base.
-              StudyMate AI will index semantic passages so your AI tutor can answer with verifiable page citations.
+              Upload your lecture slides (PDF/PPTX), Word documents (.docx), textbook chapters, or Markdown/TXT notes to build your grounded study space.
+              StudyMate AI will extract real passages so your tutor and assessments are strictly grounded.
             </p>
           </div>
 
@@ -253,12 +238,16 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
             </button>
           </div>
 
-          <div className="pt-4 flex items-center justify-center gap-4 text-xs text-slate-400 font-mono">
+          <div className="pt-4 flex flex-wrap items-center justify-center gap-4 text-xs text-slate-400 font-mono">
             <span>PDF Textbooks</span>
+            <span aria-hidden="true">·</span>
+            <span>Word Documents</span>
             <span aria-hidden="true">·</span>
             <span>PPTX Slides</span>
             <span aria-hidden="true">·</span>
             <span>Markdown Notes</span>
+            <span aria-hidden="true">·</span>
+            <span>Plain Text</span>
           </div>
         </div>
       ) : (
@@ -317,71 +306,138 @@ export const MaterialsSection: React.FC<MaterialsSectionProps> = ({
                 </p>
               </div>
             ) : (
-              filteredMaterials.map((material) => (
-                <div
-                  key={material.id}
-                  className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div className="flex items-start gap-3.5">
-                    <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-indigo-400 shrink-0 mt-0.5">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="font-mono text-indigo-400 font-semibold">
-                          {material.courseCode}
-                        </span>
-                        <span aria-hidden="true" className="text-slate-600">·</span>
-                        <span className="text-slate-400 capitalize">{material.fileType}</span>
-                        <span aria-hidden="true" className="text-slate-600">·</span>
-                        <span className="text-slate-400">{material.fileSizeFormatted}</span>
-                      </div>
+              filteredMaterials.map((material) => {
+                // Determine normalized document label & badge styling
+                let docTypeLabel = 'Document';
+                let docBadgeClass = 'bg-slate-800 text-slate-300 border-slate-700';
 
-                      <h3 className="text-sm font-semibold text-slate-200">{material.title}</h3>
-                      <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
-                        <span>{material.filename}</span>
-                        <span aria-hidden="true" className="text-slate-600">·</span>
-                        <span>{material.pageCount} pages/slides</span>
-                        <span aria-hidden="true" className="text-slate-600">·</span>
-                        <span className="text-emerald-400">{material.chunksCount} chunks indexed</span>
+                if (material.fileType === 'pdf') {
+                  docTypeLabel = 'PDF';
+                  docBadgeClass = 'bg-rose-950/60 text-rose-300 border-rose-800/60';
+                } else if (material.fileType === 'docx') {
+                  docTypeLabel = 'Word Document';
+                  docBadgeClass = 'bg-blue-950/60 text-blue-300 border-blue-800/60';
+                } else if (material.fileType === 'pptx' || material.fileType === 'slides') {
+                  docTypeLabel = 'PowerPoint';
+                  docBadgeClass = 'bg-amber-950/60 text-amber-300 border-amber-800/60';
+                } else if (material.fileType === 'md') {
+                  docTypeLabel = 'Markdown';
+                  docBadgeClass = 'bg-purple-950/60 text-purple-300 border-purple-800/60';
+                } else if (material.fileType === 'txt' || material.fileType === 'notes') {
+                  docTypeLabel = 'Plain Text';
+                  docBadgeClass = 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60';
+                }
+
+                // Determine honest unit string (pages for PDF, slides for PPTX, none for DOCX/MD/TXT)
+                let unitString: string | null = null;
+                if (material.fileType === 'pdf' && material.pageCount !== undefined) {
+                  unitString = `${material.pageCount} ${material.pageCount === 1 ? 'page' : 'pages'}`;
+                } else if (
+                  (material.fileType === 'pptx' || material.fileType === 'slides') &&
+                  material.slideCount !== undefined
+                ) {
+                  unitString = `${material.slideCount} ${material.slideCount === 1 ? 'slide' : 'slides'}`;
+                }
+
+                const isFailed = material.processingStatus === 'failed';
+                const isPartial = material.processingStatus === 'partially_extracted';
+
+                return (
+                  <div
+                    key={material.id}
+                    className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-indigo-400 shrink-0 mt-0.5">
+                        <FileText className="w-5 h-5" />
                       </div>
-                      {material.statusMessage && (
-                        <p className="text-[11px] text-slate-400">{material.statusMessage}</p>
-                      )}
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-mono text-indigo-400 font-semibold">
+                            {material.courseCode}
+                          </span>
+                          <span aria-hidden="true" className="text-slate-600">·</span>
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${docBadgeClass}`}>
+                            {docTypeLabel}
+                          </span>
+                          <span aria-hidden="true" className="text-slate-600">·</span>
+                          <span className="text-slate-400">{material.fileSizeFormatted}</span>
+                          {isFailed && (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-950 text-rose-300 border border-rose-800/70">
+                              Extraction Failed
+                            </span>
+                          )}
+                          {isPartial && (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950 text-amber-300 border border-amber-800/70">
+                              Partial Text
+                            </span>
+                          )}
+                        </div>
+
+                        <h3 className="text-sm font-semibold text-slate-200">{material.title}</h3>
+                        <div className="text-xs text-slate-400 font-mono flex flex-wrap items-center gap-2">
+                          <span>{material.filename}</span>
+                          {unitString && (
+                            <>
+                              <span aria-hidden="true" className="text-slate-600">·</span>
+                              <span>{unitString}</span>
+                            </>
+                          )}
+                          <span aria-hidden="true" className="text-slate-600">·</span>
+                          {isFailed ? (
+                            <span className="text-rose-400">0 chunks indexed</span>
+                          ) : (
+                            <span className="text-emerald-400">{material.chunksCount} chunks indexed</span>
+                          )}
+                        </div>
+
+                        {material.extractionError ? (
+                          <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-800/50 text-rose-300 text-xs flex items-start gap-2 mt-1">
+                            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                            <p>{material.extractionError}</p>
+                          </div>
+                        ) : (
+                          material.statusMessage && (
+                            <p className="text-[11px] text-slate-400">{material.statusMessage}</p>
+                          )
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-800">
+                      <button
+                        onClick={() => onInspectMaterial(material)}
+                        disabled={material.chunksCount === 0}
+                        className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 text-xs font-medium border border-slate-800 transition-colors flex items-center gap-1.5"
+                        title={material.chunksCount === 0 ? 'No chunks extracted from this document' : 'Inspect verbatim extracted passages and source citations'}
+                      >
+                        <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Inspect Chunks</span>
+                      </button>
+
+                      <button
+                        onClick={() => onSelectMaterialForTutor(material)}
+                        disabled={material.chunksCount === 0}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/80 disabled:opacity-40 disabled:cursor-not-allowed text-indigo-300 text-xs font-medium border border-indigo-800/40 transition-colors flex items-center gap-1.5"
+                        title={material.chunksCount === 0 ? 'Upload a document with extractable text to tutor' : 'Ask questions specifically about this material'}
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        <span>Ask Tutor</span>
+                      </button>
+
+                      <button
+                        onClick={() => onDeleteMaterial(material.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
+                        title="Delete document"
+                        aria-label={`Delete ${material.title}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-800">
-                    <button
-                      onClick={() => onInspectMaterial(material)}
-                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium border border-slate-800 transition-colors flex items-center gap-1.5"
-                      title="Inspect raw extracted passages and citations"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Inspect Chunks</span>
-                    </button>
-
-                    <button
-                      onClick={() => onSelectMaterialForTutor(material)}
-                      className="px-3 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-300 text-xs font-medium border border-indigo-800/40 transition-colors flex items-center gap-1.5"
-                      title="Ask questions specifically about this material"
-                    >
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>Ask Tutor</span>
-                    </button>
-
-                    <button
-                      onClick={() => onDeleteMaterial(material.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
-                      title="Delete document"
-                      aria-label={`Delete ${material.title}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

@@ -160,6 +160,9 @@ export function studyMateApiPlugin(): Plugin {
                 materialId: chunk.materialId,
                 materialTitle: chunk.materialTitle,
                 pageOrSlideNumber: chunk.pageOrSlideNumber,
+                pageNumber: chunk.pageNumber,
+                slideNumber: chunk.slideNumber,
+                anchorLabel: chunk.anchorLabel,
                 sectionHeading: chunk.sectionHeading,
                 excerpt: chunk.extractedText.slice(0, 200) + '...',
                 relevanceScore: Math.min(0.99, Math.max(0.75, score * 1.5)),
@@ -171,7 +174,7 @@ export function studyMateApiPlugin(): Plugin {
                   const excerptsBlock = selectedMatches
                     .map(
                       (m) =>
-                        `[Source: ${m.chunk.materialTitle} | Page/Slide: ${m.chunk.pageOrSlideNumber} | Section: ${m.chunk.sectionHeading}]\n${m.chunk.extractedText}`
+                        `[Source: ${m.chunk.materialTitle} | Location: ${m.chunk.anchorLabel || (m.chunk.pageNumber ? 'Page ' + m.chunk.pageNumber : m.chunk.slideNumber ? 'Slide ' + m.chunk.slideNumber : m.chunk.sectionHeading)} | Heading: ${m.chunk.sectionHeading}]\n${m.chunk.extractedText}`
                     )
                     .join('\n\n');
 

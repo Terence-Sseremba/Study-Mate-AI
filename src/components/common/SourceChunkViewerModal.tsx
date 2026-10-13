@@ -96,26 +96,53 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
           ) : (
             chunksToDisplay.map((chunk, idx) => {
               const text = 'extractedText' in chunk ? chunk.extractedText : chunk.excerpt;
-              const pageNum = chunk.pageOrSlideNumber;
               const heading = chunk.sectionHeading || `Section Anchor #${idx + 1}`;
+              
+              // Compute honest source anchor label without inventing fake page numbers
+              let anchorDisplay = '';
+              const docType = material?.fileType || ('documentType' in chunk ? chunk.documentType : undefined);
+              const pNum = 'pageNumber' in chunk ? chunk.pageNumber : undefined;
+              const sNum = 'slideNumber' in chunk ? chunk.slideNumber : undefined;
+
+              if (docType === 'pdf' || (pNum !== undefined && !sNum)) {
+                anchorDisplay = `Page ${pNum ?? chunk.pageOrSlideNumber ?? idx + 1}`;
+              } else if (docType === 'pptx' || (sNum !== undefined)) {
+                anchorDisplay = `Slide ${sNum ?? chunk.pageOrSlideNumber ?? idx + 1}`;
+              } else {
+                // Word, Markdown, Plain Text: use honest section/chunk anchor
+                anchorDisplay =
+                  ('anchorLabel' in chunk && chunk.anchorLabel)
+                    ? chunk.anchorLabel
+                    : `Section / Chunk ${idx + 1}`;
+              }
+
+              const docFilename =
+                material?.filename ||
+                ('filename' in chunk && chunk.filename) ||
+                material?.title ||
+                'Course Material';
 
               return (
                 <div
                   key={'id' in chunk ? chunk.id : idx}
                   className="bg-[#0B0F19] border border-slate-800/90 rounded-lg p-4 transition-all hover:border-slate-700"
                 >
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/60">
-                    <div className="flex items-center gap-2 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800/60">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
                       <span className="font-semibold text-indigo-300">{heading}</span>
                       <span aria-hidden="true" className="text-slate-600">·</span>
-                      <span className="text-slate-400 font-mono">
-                        Page / Slide {pageNum}
+                      <span className="text-slate-300 font-mono font-medium">
+                        {anchorDisplay}
+                      </span>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span className="text-slate-400 font-mono text-[11px] truncate max-w-xs">
+                        {docFilename}
                       </span>
                     </div>
 
                     <button
                       onClick={() => handleCopy(text)}
-                      className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 transition-colors"
+                      className="self-end sm:self-auto flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 transition-colors"
                       title="Copy excerpt text"
                     >
                       {copied ? (
@@ -132,16 +159,16 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
                     </button>
                   </div>
 
-                  <p className="text-sm text-slate-300 leading-relaxed font-sans font-normal">
+                  <p className="text-sm text-slate-300 leading-relaxed font-sans font-normal whitespace-pre-wrap">
                     {text}
                   </p>
 
                   <div className="mt-3 pt-2 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Grounding anchor: Verified</span>
+                    <span>Source passage: Verbatim extracted text</span>
                     <span className="font-mono">
                       {'tokenEstimate' in chunk && chunk.tokenEstimate
                         ? `~${chunk.tokenEstimate} tokens`
-                        : 'Source-verified'}
+                        : `${text.length} characters`}
                     </span>
                   </div>
                 </div>

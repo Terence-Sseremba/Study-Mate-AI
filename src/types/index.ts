@@ -3,12 +3,22 @@
  * Designed for Multimodal AI Hackathon 2026, Track D
  */
 
-export type DocumentType = 'pdf' | 'slides' | 'notes' | 'textbook';
+export type DocumentType =
+  | 'pdf'
+  | 'docx'
+  | 'pptx'
+  | 'md'
+  | 'txt'
+  | 'slides'
+  | 'notes'
+  | 'textbook';
 
 export type ProcessingStatus =
   | 'uploaded'
   | 'parsing'
   | 'indexed'
+  | 'partially_extracted'
+  | 'failed'
   | 'error'
   | 'prototype_staged';
 
@@ -16,9 +26,15 @@ export interface SourceChunk {
   id: string;
   materialId: string;
   materialTitle: string;
-  pageOrSlideNumber: number;
+  filename?: string;
+  documentType?: DocumentType;
+  chunkIndex?: number;
+  pageNumber?: number; // Genuine page number (PDF only)
+  slideNumber?: number; // Genuine slide number (PPTX only)
+  pageOrSlideNumber?: number; // Backward compatibility with existing components
   sectionHeading: string;
-  extractedText: string;
+  anchorLabel: string; // Honest source anchor: "Page 2", "Slide 4", "Word Document — Section 1", "Markdown — ## Intro", "Chunk 3"
+  extractedText: string; // VERBATIM source text
   tokenEstimate?: number;
   confidenceScore?: number;
 }
@@ -28,14 +44,19 @@ export interface StudyMaterial {
   title: string;
   filename: string;
   fileType: DocumentType;
+  fileExtension?: string;
+  mimeType?: string;
+  fileSizeBytes?: number;
   fileSizeFormatted: string;
-  pageCount: number;
+  pageCount?: number; // Real page count for PDFs only
+  slideCount?: number; // Real slide count for PPTX only
   chunksCount: number;
   uploadedAt: string;
   courseCode: string;
   courseName: string;
   processingStatus: ProcessingStatus;
   statusMessage?: string;
+  extractionError?: string;
   chunks: SourceChunk[];
   isDemoSample?: boolean;
 }
@@ -45,7 +66,10 @@ export interface SourceCitation {
   chunkId: string;
   materialId: string;
   materialTitle: string;
-  pageOrSlideNumber: number;
+  pageOrSlideNumber?: number;
+  pageNumber?: number;
+  slideNumber?: number;
+  anchorLabel?: string;
   sectionHeading: string;
   excerpt: string;
   relevanceScore: number; // 0.0 - 1.0
@@ -94,7 +118,8 @@ export interface QuizQuestion {
   difficulty: DifficultyLevel;
   sourceReference: {
     materialTitle: string;
-    pageOrSlideNumber: number;
+    pageOrSlideNumber?: number;
+    anchorLabel?: string;
     quoteExcerpt: string;
   };
 }
