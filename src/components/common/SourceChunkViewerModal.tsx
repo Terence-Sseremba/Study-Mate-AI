@@ -68,7 +68,7 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="source-inspector-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-on-background/40 backdrop-blur animate-in fade-in duration-150"
+      className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-on-background/40 backdrop-blur animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div

@@ -116,7 +116,7 @@ export interface TutorMessage {
   failedMaterialFilter?: string;
 }
 
-export type DifficultyLevel = 'foundational' | 'intermediate' | 'advanced';
+export type DifficultyLevel = 'foundational' | 'foundation' | 'intermediate' | 'advanced';
 
 export interface QuizQuestion {
   id: string;
@@ -127,11 +127,18 @@ export interface QuizQuestion {
   correctOptionIndex: number;
   explanation: string;
   difficulty: DifficultyLevel;
+  practiceMethod?: PracticeMethod;
   sourceReference: {
+    id?: string;
+    materialId?: string;
+    chunkId?: string;
     materialTitle: string;
+    sectionHeading?: string;
     pageOrSlideNumber?: number;
+    pageOrSection?: string;
     anchorLabel?: string;
     quoteExcerpt: string;
+    similarityScore?: number;
   };
 }
 
@@ -141,12 +148,15 @@ export interface QuizAttempt {
   topicId: string;
   topicName: string;
   difficulty: DifficultyLevel;
+  practiceMethod?: PracticeMethod;
   totalQuestions: number;
   score: number;
   percentage: number;
   completedAt: string;
   userAnswers: Record<string, number>; // questionId -> selectedIndex
   timeSpentSeconds: number;
+  topicBreakdown?: Array<{ topicId: string; topicName: string; correct: number; total: number }>;
+  weakAreas?: string[];
   isDemoSample?: boolean;
 }
 
@@ -223,3 +233,25 @@ export interface GroundedAnswerResponse {
   model: string;
   apiKeyConfigured: boolean;
 }
+
+export interface SavedStudyNote {
+  id: string;
+  title: string;
+  content: string;
+  sourceLabel?: string;
+  sourceTitle?: string;
+  anchorLabel?: string;
+  citations?: SourceCitation[];
+  createdAt: string;
+}
+
+export interface TutorSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: TutorMessage[];
+  interactionMode?: TutorInteractionMode;
+  mode?: TutorInteractionMode;
+}
+

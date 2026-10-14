@@ -165,7 +165,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             }}
           >
             <span className="material-symbols-outlined text-sm text-emerald-700">menu_book</span>
-            <span>Grounded</span>
+            <span>Grounded Study</span>
           </button>
         </div>
 

@@ -1,7 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
-import type { DocumentType, SourceChunk, ProcessingStatus, StudyMaterial } from '../types';
+import type { DocumentType, SourceChunk, ProcessingStatus, StudyMaterial } from '../types/index.ts';
 
 // Ensure Promise.try is available across runtime environments
 if (typeof Promise !== 'undefined' && !(Promise as any).try) {
@@ -183,6 +183,176 @@ function decodeXmlEntities(str: string): string {
 }
 
 /**
+ * Checks whether a section heading is just a positional placeholder
+ * (e.g., "Page 1", "Chunk 2", "Section 1", "Slide 3") rather than a real subject heading.
+ */
+export function isGenericSectionHeading(heading?: string): boolean {
+  if (!heading) return true;
+  const trimmed = heading.trim();
+  if (!trimmed) return true;
+  return /^(?:page|chunk|section|slide|part|overview|document|untitled|course\s+passage|passage|text\s*[-—–]?\s*chunk)\s*\d*$/i.test(
+    trimmed
+  );
+}
+
+const TRAILING_NOISE_WORDS = new Set([
+  'the', 'a', 'an', 'of', 'in', 'on', 'for', 'to', 'with', 'and', 'or', 'by',
+  'at', 'from', 'as', 'into', 'that', 'which', 'who', 'is', 'are', 'was', 'were',
+  'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+  'would', 'shall', 'should', 'may', 'might', 'must', 'can', 'could', 'this',
+  'these', 'those', 'their', 'our', 'your', 'its'
+]);
+
+/**
+ * Extracts a meaningful section/topic heading from raw passage text when an explicit
+ * structural heading is unavailable or generic.
+ */
+export function extractMeaningfulSectionHeading(
+  rawText: string,
+  fallbackLabel = 'Document Section'
+): string {
+  if (!rawText || !rawText.trim()) return fallbackLabel;
+
+  // Strip leading page numbers or running markers like "Page 1 of 4"
+  const text = rawText
+    .replace(/^\s*(?:page\s*\d+(?:\s*of\s*\d+)?|\d+\s*\/\s*\d+)\s*/i, '')
+    .trim();
+
+  if (!text) return fallbackLabel;
+
+  // 1. Check multi-line structure for a standalone title line at the top
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !/^(?:page\s*\d+|\d+)$/i.test(l));
+
+  if (lines.length > 0) {
+    const firstLine = lines[0]
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^[•*-]\s+/, '')
+      .replace(/[:\-–—]+$/, '')
+      .trim();
+
+    const wordCount = firstLine.split(/\s+/).length;
+    if (
+      firstLine.length >= 4 &&
+      firstLine.length <= 72 &&
+      wordCount >= 1 &&
+      wordCount <= 11 &&
+      /[A-Za-z]{3,}/.test(firstLine) &&
+      !/[.;,?]$/.test(firstLine) &&
+      !isGenericSectionHeading(firstLine)
+    ) {
+      return firstLine;
+    }
+  }
+
+  const openingWindow = text.slice(0, 360).replace(/\s+/g, ' ').trim();
+
+  // 2. Check for explicit Track / Module / Chapter / Unit / Part / Schedule designators
+  const structuralMatch = openingWindow.match(
+    /\b((?:Track|Module|Chapter|Unit|Topic|Lecture|Schedule|Part)\s+[A-Z0-9]+(?:\s*[:\-–—]\s*[A-Z0-9][A-Za-z0-9\s,&/()'-]{2,45})?)/i
+  );
+  if (structuralMatch && structuralMatch[1]) {
+    const candidate = structuralMatch[1].replace(/[:\-–—]+$/, '').trim();
+    if (candidate.length >= 5 && candidate.length <= 68 && !isGenericSectionHeading(candidate)) {
+      return candidate;
+    }
+  }
+
+  // 3. Check for numbered heading or concept definition at start of text
+  const conceptMatch = openingWindow.match(
+    /^(?:(?:\d+(?:\.\d+)*\.?|[IVX]+\.)\s+)?([A-Z][A-Za-z0-9\s,&/()'-]{3,54}?)(?:\s*[:\-–—]\s+|\s+\b(?:is\s+(?:a|an|the|defined\s+as)|are\s+(?:defined\s+as|levied|used)|refers\s+to|requires|establishes|governs|represents|consists\s+of)\b)/
+  );
+  if (conceptMatch && conceptMatch[1]) {
+    const candidate = conceptMatch[1].trim();
+    if (
+      candidate.length >= 4 &&
+      candidate.length <= 64 &&
+      candidate.split(/\s+/).length <= 9 &&
+      !isGenericSectionHeading(candidate)
+    ) {
+      return candidate;
+    }
+  }
+
+  // 4. Derive from the opening sentence's subject clause or key words
+  const firstSentence = openingWindow
+    .split(/(?<=[.!?])\s+|\s+[•|]\s+/)[0]
+    .replace(/^(?:\d+(?:\.\d+)*\.?|[•*-])\s+/, '')
+    .trim();
+
+  const verbSplit = firstSentence.match(
+    /^([A-Z][A-Za-z0-9\s,&/()'-]{4,52}?)\s+\b(?:is|are|was|were|must|should|will|can|may|provides|defines|describes|explains|requires|includes|consists|involves|introduces|applies|allows)\b/
+  );
+  if (verbSplit && verbSplit[1]) {
+    const subjectClause = verbSplit[1].replace(/[,:;]+$/, '').trim();
+    const subjectWords = subjectClause.split(/\s+/);
+    if (
+      subjectClause.length >= 5 &&
+      subjectWords.length >= 2 &&
+      subjectWords.length <= 8 &&
+      !isGenericSectionHeading(subjectClause)
+    ) {
+      return subjectClause;
+    }
+  }
+
+  // 5. Fallback: take the first 5-7 meaningful words from the opening text
+  const rawWords = firstSentence
+    .replace(/[^A-Za-z0-9\s&/()-]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+
+  // Strip leading articles/fillers
+  while (
+    rawWords.length > 3 &&
+    /^(?:the|a|an|in|on|this|these|note|notes|chapter|section|page|\d+)$/i.test(rawWords[0])
+  ) {
+    rawWords.shift();
+  }
+
+  const sliceWords = rawWords.slice(0, 6);
+  while (
+    sliceWords.length > 2 &&
+    TRAILING_NOISE_WORDS.has(sliceWords[sliceWords.length - 1].toLowerCase())
+  ) {
+    sliceWords.pop();
+  }
+
+  const constructed = sliceWords.join(' ').trim();
+  if (constructed.length >= 4 && /[A-Za-z]{3,}/.test(constructed)) {
+    const capitalized = constructed.charAt(0).toUpperCase() + constructed.slice(1);
+    return capitalized.length > 64 ? capitalized.slice(0, 61).trim() + '...' : capitalized;
+  }
+
+  return fallbackLabel;
+}
+
+/**
+ * Derives a clean, human-readable study topic name from a SourceChunk.
+ * Preserves real document headings when present and extracts meaningful subject
+ * titles when a chunk only has a positional label (like "Page 1" or "Chunk 1").
+ */
+export function deriveTopicNameFromChunk(chunk: SourceChunk, index = 0): string {
+  const rawHeading = (chunk.sectionHeading || '').trim();
+
+  // Strip positional prefixes like "Slide 2: " or "Page 3: " or "Section 1: "
+  const strippedPrefix = rawHeading
+    .replace(/^(?:slide|page|section|chunk|part)\s*\d+\s*[:\-–—]\s*/i, '')
+    .trim();
+
+  if (strippedPrefix && !isGenericSectionHeading(strippedPrefix)) {
+    return strippedPrefix.replace(/^(?:\d+(?:\.\d+)*\.?\s+)/, '').trim() || strippedPrefix;
+  }
+
+  return extractMeaningfulSectionHeading(
+    chunk.extractedText,
+    chunk.materialTitle ? `${chunk.materialTitle} — Section ${index + 1}` : `Section ${index + 1}`
+  );
+}
+
+/**
  * 2. REAL PDF EXTRACTION (Page-by-page)
  */
 export async function extractPdf(
@@ -224,8 +394,11 @@ export async function extractPdf(
         const page = await pdfDoc.getPage(pageIdx);
         const textContent = await page.getTextContent();
         const pageText = textContent.items
-          .map((item: any) => ('str' in item ? item.str : ''))
-          .join(' ');
+          .map((item: any) => {
+            if (!('str' in item)) return '';
+            return item.hasEOL ? `${item.str}\n` : `${item.str} `;
+          })
+          .join('');
         const cleaned = cleanText(pageText);
 
         if (cleaned.length > 0) {
@@ -263,6 +436,10 @@ export async function extractPdf(
       // If page is reasonably sized (< 1100 chars), keep it as a coherent page chunk
       if (page.text.length <= 1100) {
         chunkIdx++;
+        const derivedHeading = extractMeaningfulSectionHeading(
+          page.text,
+          `Page ${page.pageNumber}`
+        );
         chunks.push({
           id: `chunk-${materialId}-p${page.pageNumber}-${chunkIdx}`,
           materialId,
@@ -272,7 +449,7 @@ export async function extractPdf(
           chunkIndex: chunkIdx,
           pageNumber: page.pageNumber,
           pageOrSlideNumber: page.pageNumber,
-          sectionHeading: `Page ${page.pageNumber}`,
+          sectionHeading: derivedHeading,
           anchorLabel: `Page ${page.pageNumber}`,
           extractedText: page.text,
           tokenEstimate: Math.max(1, Math.round(page.text.length / 4)),
@@ -286,6 +463,11 @@ export async function extractPdf(
         for (const para of paragraphs) {
           if (currentCombined.length + para.length > 900 && currentCombined.length > 300) {
             chunkIdx++;
+            const chunkText = currentCombined.trim();
+            const derivedHeading = extractMeaningfulSectionHeading(
+              chunkText,
+              `Page ${page.pageNumber}`
+            );
             chunks.push({
               id: `chunk-${materialId}-p${page.pageNumber}-${chunkIdx}`,
               materialId,
@@ -295,9 +477,9 @@ export async function extractPdf(
               chunkIndex: chunkIdx,
               pageNumber: page.pageNumber,
               pageOrSlideNumber: page.pageNumber,
-              sectionHeading: `Page ${page.pageNumber}`,
+              sectionHeading: derivedHeading,
               anchorLabel: `Page ${page.pageNumber}`,
-              extractedText: currentCombined.trim(),
+              extractedText: chunkText,
               tokenEstimate: Math.max(1, Math.round(currentCombined.length / 4)),
               confidenceScore: 1.0,
             });
@@ -309,6 +491,11 @@ export async function extractPdf(
 
         if (currentCombined.trim().length > 0) {
           chunkIdx++;
+          const chunkText = currentCombined.trim();
+          const derivedHeading = extractMeaningfulSectionHeading(
+            chunkText,
+            `Page ${page.pageNumber}`
+          );
           chunks.push({
             id: `chunk-${materialId}-p${page.pageNumber}-${chunkIdx}`,
             materialId,
@@ -318,9 +505,9 @@ export async function extractPdf(
             chunkIndex: chunkIdx,
             pageNumber: page.pageNumber,
             pageOrSlideNumber: page.pageNumber,
-            sectionHeading: `Page ${page.pageNumber}`,
+            sectionHeading: derivedHeading,
             anchorLabel: `Page ${page.pageNumber}`,
-            extractedText: currentCombined.trim(),
+            extractedText: chunkText,
             tokenEstimate: Math.max(1, Math.round(currentCombined.length / 4)),
             confidenceScore: 1.0,
           });
@@ -414,10 +601,12 @@ export async function extractDocx(
         // Strip HTML tags for clean text
         const plainText = cleanText(part.replace(/<[^>]+>/g, ' '));
         if (plainText.length > 25) {
+          const resolvedHeading =
+            heading || extractMeaningfulSectionHeading(plainText, `Section ${secIndex}`);
           sections.push({
-            heading: heading || `Section ${secIndex}`,
+            heading: resolvedHeading,
             text: plainText,
-            anchorLabel: `Word Document — ${heading || `Section ${secIndex}`}`,
+            anchorLabel: `Word Document — ${resolvedHeading}`,
           });
           secIndex++;
         }
@@ -434,9 +623,11 @@ export async function extractDocx(
 
       for (const para of paragraphs) {
         if (buffer.length + para.length > 800 && buffer.length > 250) {
+          const chunkText = buffer.trim();
+          const resolvedHeading = extractMeaningfulSectionHeading(chunkText, `Section ${secIndex}`);
           sections.push({
-            heading: `Section ${secIndex}`,
-            text: buffer.trim(),
+            heading: resolvedHeading,
+            text: chunkText,
             anchorLabel: `Word Document — Section ${secIndex}`,
           });
           secIndex++;
@@ -447,9 +638,11 @@ export async function extractDocx(
       }
 
       if (buffer.trim().length > 0) {
+        const chunkText = buffer.trim();
+        const resolvedHeading = extractMeaningfulSectionHeading(chunkText, `Section ${secIndex}`);
         sections.push({
-          heading: `Section ${secIndex}`,
-          text: buffer.trim(),
+          heading: resolvedHeading,
+          text: chunkText,
           anchorLabel: `Word Document — Section ${secIndex}`,
         });
       }
@@ -590,9 +783,13 @@ export async function extractPptx(
       if (!slide.text || slide.text.trim().length === 0) continue;
 
       chunkIdx++;
-      const heading = slide.title
-        ? `Slide ${slide.slideNumber}: ${slide.title}`
-        : `Slide ${slide.slideNumber}`;
+      const derivedSlideTopic =
+        slide.title ||
+        extractMeaningfulSectionHeading(slide.text, `Slide ${slide.slideNumber}`);
+      const heading =
+        derivedSlideTopic && !/^slide\s*\d+$/i.test(derivedSlideTopic)
+          ? derivedSlideTopic
+          : `Slide ${slide.slideNumber}`;
 
       chunks.push({
         id: `chunk-${materialId}-slide-${slide.slideNumber}`,
@@ -656,17 +853,21 @@ export async function extractMarkdown(
   // Split by markdown headings: #, ##, ###, ####
   const lines = fullText.split('\n');
   const sections: ExtractedSection[] = [];
-  let currentHeading = 'Overview';
+  let currentHeading = '';
   let currentBuffer: string[] = [];
 
   for (const line of lines) {
     const headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
     if (headingMatch) {
       if (currentBuffer.join(' ').trim().length > 25) {
+        const secText = cleanText(currentBuffer.join('\n'));
+        const resolvedHeading =
+          currentHeading ||
+          extractMeaningfulSectionHeading(secText, `${materialTitle} — Overview`);
         sections.push({
-          heading: currentHeading,
-          text: cleanText(currentBuffer.join('\n')),
-          anchorLabel: `Markdown — ${currentHeading}`,
+          heading: resolvedHeading,
+          text: secText,
+          anchorLabel: `Markdown — ${resolvedHeading}`,
         });
         currentBuffer = [];
       }
@@ -677,10 +878,14 @@ export async function extractMarkdown(
   }
 
   if (currentBuffer.join(' ').trim().length > 0) {
+    const secText = cleanText(currentBuffer.join('\n'));
+    const resolvedHeading =
+      currentHeading ||
+      extractMeaningfulSectionHeading(secText, `${materialTitle} — Overview`);
     sections.push({
-      heading: currentHeading,
-      text: cleanText(currentBuffer.join('\n')),
-      anchorLabel: `Markdown — ${currentHeading}`,
+      heading: resolvedHeading,
+      text: secText,
+      anchorLabel: `Markdown — ${resolvedHeading}`,
     });
   }
 
@@ -688,10 +893,15 @@ export async function extractMarkdown(
   if (sections.length === 0) {
     const paras = fullText.split(/\n\s*\n/).filter((p) => p.trim().length > 25);
     paras.forEach((p, idx) => {
+      const cleanedPara = cleanText(p);
+      const resolvedHeading = extractMeaningfulSectionHeading(
+        cleanedPara,
+        `Section ${idx + 1}`
+      );
       sections.push({
-        heading: `Section ${idx + 1}`,
-        text: cleanText(p),
-        anchorLabel: `Markdown — Section ${idx + 1}`,
+        heading: resolvedHeading,
+        text: cleanedPara,
+        anchorLabel: `Markdown — ${resolvedHeading}`,
       });
     });
   }
@@ -751,6 +961,8 @@ export async function extractPlainText(
   for (const para of paragraphs) {
     if (buffer.length + para.length > 800 && buffer.length > 250) {
       chunkIdx++;
+      const chunkText = buffer.trim();
+      const resolvedHeading = extractMeaningfulSectionHeading(chunkText, `Section ${chunkIdx}`);
       chunks.push({
         id: `chunk-${materialId}-txt-${chunkIdx}`,
         materialId,
@@ -761,9 +973,9 @@ export async function extractPlainText(
         pageNumber: undefined,
         slideNumber: undefined,
         pageOrSlideNumber: undefined,
-        sectionHeading: `Chunk ${chunkIdx}`,
-        anchorLabel: `Text — Chunk ${chunkIdx}`,
-        extractedText: buffer.trim(),
+        sectionHeading: resolvedHeading,
+        anchorLabel: `Text — Section ${chunkIdx}`,
+        extractedText: chunkText,
         tokenEstimate: Math.max(1, Math.round(buffer.length / 4)),
         confidenceScore: 1.0,
       });
@@ -775,6 +987,8 @@ export async function extractPlainText(
 
   if (buffer.trim().length > 0) {
     chunkIdx++;
+    const chunkText = buffer.trim();
+    const resolvedHeading = extractMeaningfulSectionHeading(chunkText, `Section ${chunkIdx}`);
     chunks.push({
       id: `chunk-${materialId}-txt-${chunkIdx}`,
       materialId,
@@ -785,9 +999,9 @@ export async function extractPlainText(
       pageNumber: undefined,
       slideNumber: undefined,
       pageOrSlideNumber: undefined,
-      sectionHeading: `Chunk ${chunkIdx}`,
-      anchorLabel: `Text — Chunk ${chunkIdx}`,
-      extractedText: buffer.trim(),
+      sectionHeading: resolvedHeading,
+      anchorLabel: `Text — Section ${chunkIdx}`,
+      extractedText: chunkText,
       tokenEstimate: Math.max(1, Math.round(buffer.length / 4)),
       confidenceScore: 1.0,
     });

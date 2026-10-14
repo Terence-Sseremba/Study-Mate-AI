@@ -29,9 +29,14 @@ import {
   setStoredReviewRecords,
   getStoredTutorInteractionMode,
   setStoredTutorInteractionMode,
+  getStoredSessions,
+  setStoredSessions,
+  getStoredNotes,
+  setStoredNotes,
 } from './lib/storage';
 
 import { calculateNextReview } from './lib/spacedRepetition';
+import { deriveTopicNameFromChunk, isGenericSectionHeading } from './lib/documentExtraction';
 
 import type {
   StudyMaterial,
@@ -44,7 +49,27 @@ import type {
   TutorPreferences,
   ReviewRecord,
   PracticeMethod,
+  TutorSession,
+  SavedStudyNote,
 } from './types';
+
+function normalizeMaterialsTopics(rawMaterials: StudyMaterial[]): StudyMaterial[] {
+  return rawMaterials.map((mat) => {
+    if (!Array.isArray(mat.chunks) || mat.chunks.length === 0) return mat;
+    let changed = false;
+    const normalizedChunks = mat.chunks.map((chunk) => {
+      if (isGenericSectionHeading(chunk.sectionHeading)) {
+        const derived = deriveTopicNameFromChunk(chunk);
+        if (derived && derived !== chunk.sectionHeading) {
+          changed = true;
+          return { ...chunk, sectionHeading: derived };
+        }
+      }
+      return chunk;
+    });
+    return changed ? { ...mat, chunks: normalizedChunks } : mat;
+  });
+}
 
 export default function App() {
   // Default to the Stitch Workspace view!
@@ -68,10 +93,15 @@ export default function App() {
   });
   const [tuneModalOpen, setTuneModalOpen] = useState(false);
 
-  // Learning Resources & Tracking State (loaded safely from storage)
+  // Learning Resources & Tracking State (loaded safely from storage and normalized for topic headings)
   const [materials, setMaterials] = useState<StudyMaterial[]>(() => {
     const stored = getStoredMaterials();
-    return stored.length > 0 ? stored : INITIAL_MATERIALS;
+    const initial = stored.length > 0 ? stored : INITIAL_MATERIALS;
+    const normalized = normalizeMaterialsTopics(initial);
+    if (stored.length > 0) {
+      setStoredMaterials(normalized);
+    }
+    return normalized;
   });
 
   const [masteryTopics, setMasteryTopics] = useState<TopicMastery[]>(() => {
@@ -88,12 +118,129 @@ export default function App() {
     return getStoredReviewRecords();
   });
 
-  const [questions, setQuestions] = useState(INITIAL_QUIZ_QUESTIONS);
+  const [questions] = useState(INITIAL_QUIZ_QUESTIONS);
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => `session-${Date.now()}`);
   const [tutorMessages, setTutorMessages] = useState<TutorMessage[]>(INITIAL_TUTOR_MESSAGES);
+  const [pastSessions, setPastSessions] = useState<TutorSession[]>(() => getStoredSessions());
+  const [savedNotes, setSavedNotes] = useState<SavedStudyNote[]>(() => getStoredNotes());
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const [tutorInteractionMode, setTutorInteractionMode] = useState<TutorInteractionMode>(() =>
     getStoredTutorInteractionMode()
   );
+
+  // Automatically synchronize organized topics from uploaded materials into masteryTopics
+  useEffect(() => {
+    setMasteryTopics((prevTopics) => {
+      const practicedMap = new Map<string, TopicMastery>();
+      for (const t of prevTopics) {
+        if (t.evidenceCount > 0 || t.status !== 'untested') {
+          practicedMap.set(t.topicId, t);
+          practicedMap.set(t.topicName.toLowerCase(), t);
+        }
+      }
+
+      const derivedList: TopicMastery[] = [];
+      const seenTopicIds = new Set<string>();
+      const seenTopicNames = new Set<string>();
+
+      for (const mat of materials) {
+        const chunks = mat.chunks || [];
+        const matTopics: string[] = [];
+
+        for (const chunk of chunks) {
+          const heading = deriveTopicNameFromChunk(chunk).trim();
+          if (
+            heading &&
+            !isGenericSectionHeading(heading) &&
+            !matTopics.some((existing) => existing.toLowerCase() === heading.toLowerCase())
+          ) {
+            matTopics.push(heading);
+          }
+          if (matTopics.length >= 4) break;
+        }
+
+        if (matTopics.length === 0 && mat.title) {
+          matTopics.push(mat.title);
+        }
+
+        matTopics.forEach((topicName, idx) => {
+          const topicId = idx === 0 ? mat.id : `${mat.id}-topic-${idx}`;
+          const lowerName = topicName.toLowerCase();
+          if (seenTopicIds.has(topicId) || seenTopicNames.has(lowerName)) return;
+
+          const existingPracticed =
+            practicedMap.get(topicId) || practicedMap.get(lowerName);
+
+          if (existingPracticed) {
+            seenTopicIds.add(existingPracticed.topicId);
+            seenTopicNames.add(existingPracticed.topicName.toLowerCase());
+            derivedList.push(existingPracticed);
+          } else {
+            seenTopicIds.add(topicId);
+            seenTopicNames.add(lowerName);
+            derivedList.push({
+              topicId,
+              topicName,
+              courseCode: mat.courseCode || 'Uploaded Material',
+              masteryPercentage: 0,
+              status: 'untested',
+              evidenceCount: 0,
+              correctCount: 0,
+              lastPracticed: mat.uploadedAt || new Date().toISOString(),
+              weakSubtopics: [],
+              cognitiveStrengths: {
+                recall: 0,
+                application: 0,
+                analysis: 0,
+              },
+            });
+          }
+        });
+      }
+
+      // Preserve any practiced topics whose source material was removed or came from custom quizzes
+      for (const t of prevTopics) {
+        if (
+          (t.evidenceCount > 0 || t.status !== 'untested') &&
+          !seenTopicIds.has(t.topicId) &&
+          !seenTopicNames.has(t.topicName.toLowerCase())
+        ) {
+          seenTopicIds.add(t.topicId);
+          seenTopicNames.add(t.topicName.toLowerCase());
+          derivedList.push(t);
+        }
+      }
+
+      setStoredMastery(derivedList);
+      return derivedList;
+    });
+  }, [materials]);
+
+  // Persist active conversation into pastSessions whenever user messages exist
+  useEffect(() => {
+    const userMessages = tutorMessages.filter((m) => m.role === 'user');
+    if (userMessages.length === 0) return;
+
+    const firstUserText = userMessages[0].text.trim();
+    const sessionTitle =
+      firstUserText.length > 60 ? `${firstUserText.slice(0, 57)}...` : firstUserText;
+    const now = new Date().toISOString();
+
+    setPastSessions((prev) => {
+      const existing = prev.find((s) => s.id === activeSessionId);
+      const updatedSession: TutorSession = {
+        id: activeSessionId,
+        title: existing?.title || sessionTitle || 'Study Conversation',
+        createdAt: existing?.createdAt || userMessages[0].timestamp || now,
+        updatedAt: now,
+        messages: tutorMessages,
+        interactionMode: tutorInteractionMode,
+      };
+      const next = [updatedSession, ...prev.filter((s) => s.id !== activeSessionId)].slice(0, 25);
+      setStoredSessions(next);
+      return next;
+    });
+  }, [tutorMessages, activeSessionId, tutorInteractionMode]);
 
   const handleTutorModeChange = (mode: TutorInteractionMode) => {
     setTutorInteractionMode(mode);
@@ -168,7 +315,8 @@ export default function App() {
 
   // Add material handler
   const handleAddMaterial = (newMaterial: StudyMaterial) => {
-    const updated = [newMaterial, ...materials];
+    const normalized = normalizeMaterialsTopics([newMaterial])[0];
+    const updated = [normalized, ...materials];
     setMaterials(updated);
     setStoredMaterials(updated);
   };
@@ -191,7 +339,9 @@ export default function App() {
   };
 
   const handleOpenCitation = (citation: SourceCitation) => {
-    const targetMaterial = materials.find((m) => m.id === citation.materialId);
+    const targetMaterial =
+      materials.find((m) => m.id === citation.materialId) ||
+      materials.find((m) => m.title === citation.materialTitle);
     setInspectedMaterial(targetMaterial || null);
     setInspectedCitation(citation);
     setInspectorModalOpen(true);
@@ -200,7 +350,7 @@ export default function App() {
   // Tutor interactions
   const handleSelectTopicForTutor = (topicName: string, materialId?: string) => {
     setTutorInitialPrompt(
-      `Please explain the foundational concepts and potential failure modes of "${topicName}" using my course materials.`
+      `Please explain the key concepts and core details of "${topicName}" using my course materials.`
     );
     if (materialId) setActiveMaterialFilter(materialId);
     setCurrentSection('workspace');
@@ -209,7 +359,7 @@ export default function App() {
   const handleSelectMaterialForTutor = (material: StudyMaterial) => {
     setActiveMaterialFilter(material.id);
     setTutorInitialPrompt(
-      `Provide a structured high-yield conceptual overview of ${material.title}.`
+      `Provide a structured conceptual overview of ${material.title}.`
     );
     setCurrentSection('workspace');
   };
@@ -233,7 +383,8 @@ export default function App() {
   const handleSendMessage = async (
     question: string,
     materialId?: string,
-    isRetry = false
+    isRetry = false,
+    selectedMaterialIds?: string[]
   ) => {
     if (!isRetry) {
       const userMsg: TutorMessage = {
@@ -256,6 +407,7 @@ export default function App() {
         body: JSON.stringify({
           question,
           materialId,
+          selectedMaterialIds,
           materials,
           studentName: student?.name || 'Student',
           mode: tutorInteractionMode,
@@ -283,6 +435,8 @@ export default function App() {
           data.sourceLabel ||
           (data.citations && data.citations.length > 0
             ? 'Based on Your Study Materials'
+            : data.route === 'insufficient'
+            ? undefined
             : 'General Knowledge'),
         interactionMode: tutorInteractionMode,
         route: data.route || 'grounded',
@@ -292,7 +446,7 @@ export default function App() {
 
       setTutorMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
-      console.warn('API chat request encountered error, generating fallback grounding:', err);
+      console.warn('API chat request encountered error:', err);
 
       const isTimeout = err?.name === 'AbortError' || err?.message?.includes('timeout');
       const userErrorMessage = isTimeout
@@ -326,20 +480,60 @@ export default function App() {
   };
 
   const handleClearTutorHistory = () => {
+    setActiveSessionId(`session-${Date.now()}`);
     setTutorMessages(INITIAL_TUTOR_MESSAGES);
   };
 
   const handleNewSession = () => {
-    setTutorMessages([
-      {
-        id: `msg-new-session-${Date.now()}`,
-        role: 'assistant',
-        text: `Welcome to a new study session for **${activeCourse}**!\n\nI am actively grounded in your **${materials.length} indexed documents**. Ask me any question, explore mathematical proofs, or quiz yourself on key concepts.`,
-        timestamp: new Date().toISOString(),
-        isGroundingVerified: true,
-        modelUsed: 'StudyMate-Neural-v3.2',
-      },
-    ]);
+    setActiveSessionId(`session-${Date.now()}`);
+    setTutorMessages([]);
+  };
+
+  const handleSelectSession = (sessionOrId: TutorSession | string) => {
+    const session =
+      typeof sessionOrId === 'string'
+        ? pastSessions.find((s) => s.id === sessionOrId)
+        : sessionOrId;
+    if (!session) return;
+    setActiveSessionId(session.id);
+    setTutorMessages(session.messages);
+    const mode = session.interactionMode || session.mode;
+    if (mode) {
+      handleTutorModeChange(mode);
+    }
+  };
+
+  const handleDeleteSession = (sessionId: string) => {
+    setPastSessions((prev) => {
+      const next = prev.filter((s) => s.id !== sessionId);
+      setStoredSessions(next);
+      return next;
+    });
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(`session-${Date.now()}`);
+      setTutorMessages([]);
+    }
+  };
+
+  const handleSaveNote = (note: Omit<SavedStudyNote, 'id' | 'createdAt'>) => {
+    const newNote: SavedStudyNote = {
+      ...note,
+      id: `note-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    setSavedNotes((prev) => {
+      const next = [newNote, ...prev];
+      setStoredNotes(next);
+      return next;
+    });
+  };
+
+  const handleDeleteNote = (noteId: string) => {
+    setSavedNotes((prev) => {
+      const next = prev.filter((n) => n.id !== noteId);
+      setStoredNotes(next);
+      return next;
+    });
   };
 
   // Export Notes to Markdown file
@@ -351,6 +545,13 @@ export default function App() {
       `Total Sources Indexed: ${materials.length}`,
       ...materials.map((m) => `- ${m.title} (${m.chunksCount} chunks, ${m.fileType.toUpperCase()})`),
       ``,
+      ...(savedNotes.length > 0
+        ? [
+            `---`,
+            `## Saved Study Notes (${savedNotes.length})`,
+            ...savedNotes.map((n) => `\n### ${n.title}\n${n.content}\n`),
+          ]
+        : []),
       `---`,
       `## Conversation Thread (${tutorMessages.length} messages)`,
       ...tutorMessages.map(
@@ -396,14 +597,19 @@ export default function App() {
 
     // Dynamically calibrate target topic mastery in state
     setMasteryTopics((prevTopics) => {
-      const existingIdx = prevTopics.findIndex((t) => t.topicId === attempt.topicId);
+      const existingIdx = prevTopics.findIndex(
+        (t) =>
+          t.topicId === attempt.topicId ||
+          t.topicName.toLowerCase() === attempt.topicName.toLowerCase()
+      );
       let nextTopics: TopicMastery[];
 
       if (existingIdx >= 0) {
         nextTopics = prevTopics.map((topic, idx) => {
           if (idx === existingIdx) {
-            const current = topic.masteryPercentage;
-            const delta = Math.round((attempt.percentage - current) * 0.3);
+            const current = topic.evidenceCount > 0 ? topic.masteryPercentage : attempt.percentage;
+            const delta =
+              topic.evidenceCount > 0 ? Math.round((attempt.percentage - current) * 0.35) : 0;
             const newMastery = Math.min(100, Math.max(10, current + delta));
 
             let newStatus = topic.status;
@@ -491,6 +697,14 @@ export default function App() {
           initialQuestionPrompt={tutorInitialPrompt}
           onStartQuizForTopic={handleStartQuizForTopic}
           onClearSession={handleClearTutorHistory}
+          onNewSession={handleNewSession}
+          pastSessions={pastSessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onDeleteSession={handleDeleteSession}
+          savedNotes={savedNotes}
+          onSaveNote={handleSaveNote}
+          onDeleteNote={handleDeleteNote}
           onTuneClick={() => setTuneModalOpen(true)}
           onExportNotes={handleExportNotes}
           activeMaterialFilter={activeMaterialFilter}

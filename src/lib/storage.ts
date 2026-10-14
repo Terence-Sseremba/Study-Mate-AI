@@ -228,3 +228,55 @@ export function setStoredTutorInteractionMode(
   }
 }
 
+const STORAGE_KEY_TUTOR_SESSIONS = 'studymate_tutor_sessions_v1';
+const STORAGE_KEY_SAVED_NOTES = 'studymate_saved_notes_v1';
+
+export function getStoredSessions(): import('../types').TutorSession[] {
+  if (!isStorageAvailable()) return [];
+  try {
+    const data = window.localStorage.getItem(STORAGE_KEY_TUTOR_SESSIONS);
+    if (!data) return [];
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setStoredSessions(
+  sessions: import('../types').TutorSession[]
+): boolean {
+  if (!isStorageAvailable()) return false;
+  try {
+    window.localStorage.setItem(STORAGE_KEY_TUTOR_SESSIONS, JSON.stringify(sessions));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function getStoredNotes(): import('../types').SavedStudyNote[] {
+  if (!isStorageAvailable()) return [];
+  try {
+    const data = window.localStorage.getItem(STORAGE_KEY_SAVED_NOTES);
+    if (!data) return [];
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setStoredNotes(
+  notes: import('../types').SavedStudyNote[]
+): boolean {
+  if (!isStorageAvailable()) return false;
+  try {
+    window.localStorage.setItem(STORAGE_KEY_SAVED_NOTES, JSON.stringify(notes));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
