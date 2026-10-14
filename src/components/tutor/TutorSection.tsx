@@ -23,6 +23,7 @@ import type {
 } from '../../types';
 import { TutorPreferencesPanel } from './TutorPreferencesPanel';
 import { getTutorPreferencesSummary } from '../../lib/tutorInstructions';
+import { FormattedMessageContent } from './FormattedMessageContent';
 
 interface TutorSectionProps {
   materials: StudyMaterial[];
@@ -351,6 +352,13 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
                       </span>
                     )}
 
+                    {!isUser && !msg.errorState && msg.route === 'insufficient' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 text-slate-400" />
+                        Strict Grounding Scope
+                      </span>
+                    )}
+
                     {!isUser && msg.modelUsed && (
                       <>
                         <span aria-hidden="true">·</span>
@@ -408,9 +416,13 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
                       </div>
                     ) : (
                       <>
-                        <div className="whitespace-pre-wrap font-sans space-y-2">
-                          {msg.text}
-                        </div>
+                        {isUser ? (
+                          <div className="whitespace-pre-wrap font-sans leading-relaxed">
+                            {msg.text}
+                          </div>
+                        ) : (
+                          <FormattedMessageContent text={msg.text} />
+                        )}
 
                         {/* Grounded Source Citations Panel (if any) */}
                         {msg.citations && msg.citations.length > 0 && (

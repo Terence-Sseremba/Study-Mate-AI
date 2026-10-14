@@ -130,6 +130,16 @@ ${rulesList}
 - ${lengthText}
 - ${knowledgeChecksText}
 ${customSection}
+
+### MATHEMATICAL & SCIENTIFIC NOTATION:
+- Format all mathematical equations, variables, and formulas using standard LaTeX.
+- Enclose inline math within single dollar delimiters (e.g. $E(X) = np$, $A \\cup B$, $x \\ge 3$, $\\sqrt{x - 3} < 2$).
+- Enclose standalone or display equations in double dollar blocks:
+$$
+A \\cup B = \\{-1, 0, 1, 2, 3\\}
+$$
+- Use standard LaTeX constructs (e.g. \\frac{a}{b}, \\sqrt{x}, \\vec{v}, \\binom{n}{k}, \\sum, \\int, \\cup, \\cap, \\le, \\ge).
+- For currency amounts (e.g. $50, $100), write them as regular currency without LaTeX math formatting.
 `.trim();
 }
 

@@ -194,10 +194,11 @@ ${excerptsBlock}
 
 ### CRITICAL GROUNDING AND INTEGRITY DIRECTIVES:
 1. Verify that the excerpts above genuinely address the student's question: "${question}".
-2. If the excerpts do not contain enough information to answer the question, output ONLY: ROUTE_UNSUPPORTED
-3. If they are relevant, ground your answer strictly in the verified facts and definitions in the source passages above.
-4. Explicitly reference the document title and source anchor (e.g. Page X, Slide Y, or Section).
-5. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).`;
+2. If the excerpts do not contain enough substantive information to answer the question, output ONLY: ROUTE_UNSUPPORTED
+3. If they are relevant, explain the answer naturally and clearly using ONLY the verified facts and definitions from the source passages above. Do NOT merely copy or dump the raw text passage verbatim—synthesize a coherent, well-structured explanation for the student.
+4. Maintain clean, professional formatting with clear headings, bold key concepts, and formatted bullet points or numbered steps where appropriate.
+5. Explicitly reference the document title and source anchor (e.g. Page X, Slide Y, or Section).
+6. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).`;
 
                   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
                   const callResult = await generateContentWithRetry(ai, {
@@ -213,10 +214,10 @@ ${excerptsBlock}
                   if (callResult.success && callResult.data) {
                     const text = callResult.data.text?.trim() || '';
 
-                    if (text === 'ROUTE_UNSUPPORTED' || text.startsWith('ROUTE_UNSUPPORTED')) {
+                    if (text === 'ROUTE_UNSUPPORTED' || text.startsWith('ROUTE_UNSUPPORTED') || text.includes('ROUTE_UNSUPPORTED')) {
                       sendJson(200, {
                         route: 'insufficient',
-                        answer: "I couldn't find enough information in your uploaded study materials to answer that question.",
+                        answer: "I couldn't find enough information in your uploaded study materials to answer that question. You can upload relevant material or switch to Smart Tutor for a general explanation.",
                         citations: [],
                         grounded: false,
                         isGroundingVerified: false,

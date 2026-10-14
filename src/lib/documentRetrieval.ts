@@ -8,7 +8,8 @@ import type {
 } from '../types';
 
 /**
- * Common English stop words to filter out when extracting semantic query terms.
+ * Common English stop words and conversational question phrases to filter out
+ * when extracting semantic subject keywords.
  */
 const STOP_WORDS = new Set([
   'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and',
@@ -31,8 +32,68 @@ const STOP_WORDS = new Set([
   'weren\'t', 'what', 'what\'s', 'when', 'when\'s', 'where', 'where\'s',
   'which', 'while', 'who', 'who\'s', 'whom', 'why', 'why\'s', 'with', 'won\'t',
   'would', 'wouldn\'t', 'you', 'you\'d', 'you\'ll', 'you\'re', 'you\'ve', 'your',
-  'yours', 'yourself', 'yourselves', 'give', 'show', 'describe', 'define', 'meaning'
+  'yours', 'yourself', 'yourselves', 'give', 'show', 'describe', 'define', 'meaning',
+  'work', 'works', 'working', 'worked',
+  'function', 'functions', 'functioning',
+  'operate', 'operates', 'operation', 'operating',
+  'use', 'uses', 'used', 'using', 'usage',
+  'apply', 'applies', 'applied', 'application', 'applications',
+  'difference', 'differences', 'different', 'differ',
+  'compare', 'comparing', 'comparison', 'versus', 'vs',
+  'summary', 'summarize', 'summarized', 'overview',
+  'detail', 'details', 'detailed',
+  'concept', 'concepts', 'conceptual',
+  'principle', 'principles',
+  'basic', 'basics',
+  'understand', 'understanding',
+  'know', 'learn',
+  'help', 'please',
+  'type', 'types',
+  'example', 'examples',
+  'role', 'roles',
+  'purpose', 'purposes',
+  'feature', 'features',
+  'note', 'notes',
+  'mean', 'means',
+  'defined', 'definition', 'definitions',
+  'important', 'importance',
+  'various', 'general',
+  'need', 'want'
 ]);
+
+/**
+ * Normalizes a word by stripping common English inflectional suffixes.
+ */
+export function stemWord(w: string): string {
+  const s = w.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.endsWith('ies') && s.length > 4) return s.slice(0, -3) + 'y';
+  if (s.endsWith('es') && s.length > 4) return s.slice(0, -2);
+  if (s.endsWith('s') && !s.endsWith('ss') && s.length > 3) return s.slice(0, -1);
+  if (s.endsWith('ing') && s.length > 5) return s.slice(0, -3);
+  if (s.endsWith('ed') && s.length > 4) return s.slice(0, -2);
+  if (s.endsWith('tion') && s.length > 5) return s.slice(0, -4);
+  return s;
+}
+
+/**
+ * Checks if two words match semantically through exact match, prefixes, stemming,
+ * or standard academic synonyms (e.g. taxation <-> tax).
+ */
+export function wordsMatch(w1: string, w2: string): boolean {
+  if (w1 === w2) return true;
+  const s1 = stemWord(w1);
+  const s2 = stemWord(w2);
+  if (s1 === s2) return true;
+  if (w1.startsWith(w2) && w1.length <= w2.length + 3) return true;
+  if (w2.startsWith(w1) && w2.length <= w1.length + 3) return true;
+  if (s1.startsWith(s2) && s1.length <= s2.length + 2) return true;
+  if (s2.startsWith(s1) && s2.length <= s1.length + 2) return true;
+  // Specific domain synonym linkages
+  if ((w1 === 'taxation' && w2 === 'tax') || (w1 === 'tax' && w2 === 'taxation')) return true;
+  if ((w1 === 'taxation' && w2 === 'taxes') || (w1 === 'taxes' && w2 === 'taxation')) return true;
+  if ((w1 === 'flip-flops' && w2 === 'flip') || (w1 === 'flip' && w2 === 'flip-flops')) return true;
+  return false;
+}
 
 /**
  * Tokenizes a string into normalized, significant query keywords.
@@ -132,38 +193,40 @@ function escapeRegex(str: string): string {
 /**
  * Validates whether a scored chunk genuinely addresses the student's question.
  * Rejects coincidental single-term matches and prevents forcing unrelated
- * documents (e.g. taxation notes for a computer science or physics question).
+ * documents (e.g. taxation notes for a computer science or physics question),
+ * while reliably admitting genuine course inquiries (e.g. questions with
+ * singular/plural variations, synonyms, or conversational phrasing).
  */
 export function isChunkGenuinelyRelevant(
   match: ScoredChunkMatch,
   queryKeywords: string[],
-  minimumThreshold = 0.45
+  minimumThreshold = 0.40
 ): boolean {
-  if (match.score < minimumThreshold || match.matchedKeywords.length === 0) {
+  if (match.matchedKeywords.length === 0) {
     return false;
   }
 
   // Exact multi-word concept phrase match is verified strong evidence
-  if (match.exactPhraseFound && match.score >= 0.45) {
+  if (match.exactPhraseFound && match.score >= 0.40) {
     return true;
   }
 
-  // Heading match with strong score
-  if (match.headingMatch && match.score >= 0.55) {
+  // Heading match with solid keyword support
+  if (match.headingMatch && match.score >= 0.38) {
     return true;
   }
 
-  // For multi-word queries (e.g., "object-oriented programming", "sequential circuit", "import duty"):
+  // For multi-word queries:
   if (queryKeywords.length >= 2) {
     const coverage = match.matchedKeywords.length / queryKeywords.length;
 
-    // Must match at least 2 distinct keywords AND have high score AND reasonable proximity
-    if (
-      match.matchedKeywords.length >= 2 &&
-      coverage >= 0.60 &&
-      match.score >= 0.50 &&
-      (match.proximitySpan === undefined || match.proximitySpan <= 35)
-    ) {
+    // Must match at least 2 distinct keywords with sufficient coverage
+    if (match.matchedKeywords.length >= 2 && coverage >= 0.50 && match.score >= 0.40) {
+      return true;
+    }
+
+    // Single keyword matched in heading or with high occurrence density
+    if (match.headingMatch || match.score >= 0.55) {
       return true;
     }
 
@@ -171,13 +234,13 @@ export function isChunkGenuinelyRelevant(
     return false;
   }
 
-  // For single-word specific technical queries (e.g., "depreciation", "amortization"):
-  return match.score >= 0.50;
+  // For single-word specific technical queries (e.g., "depreciation", "latch", "taxation"):
+  return match.score >= 0.38;
 }
 
 /**
  * Searches and ranks document chunks against a user's question.
- * Applies a strict relevance gate before admitting passages as evidence.
+ * Applies a calibrated relevance gate before admitting passages as evidence.
  */
 export function retrieveRelevantChunks(
   materials: StudyMaterial[],
@@ -191,7 +254,7 @@ export function retrieveRelevantChunks(
   const {
     materialIdFilter,
     maxResults = 3,
-    sufficiencyThreshold = 0.45,
+    sufficiencyThreshold = 0.40,
   } = options || {};
 
   // 1. Filter materials based on user selection
@@ -235,7 +298,7 @@ export function retrieveRelevantChunks(
     };
   }
 
-  // 3. Score every chunk using phrase matching, word-boundary regex, and proximity
+  // 3. Score every chunk using phrase matching, stemming-aware tokens, and proximity
   const scoredList: ScoredChunkMatch[] = allChunks.map((chunk) => {
     const rawText = chunk.extractedText || '';
     const textLower = rawText.toLowerCase();
@@ -261,34 +324,42 @@ export function retrieveRelevantChunks(
       }
     }
 
-    // B. Word-boundary keyword matches and token positions
+    // B. Stemming and word-boundary keyword matches and token positions
     const matchedKeywords: string[] = [];
     let termMatchesCount = 0;
     const tokenPositions: number[] = [];
 
-    // Break chunk text into words for proximity measurement
+    // Break chunk text and heading into words for token matching
     const textWords = textLower.split(/\s+/);
+    const headingWords = headingLower.split(/\s+/);
+    const titleWords = docTitleLower.split(/\s+/);
 
     for (const kw of queryKeywords) {
-      const regex = new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i');
       let matchedInChunk = false;
 
-      // Find all positions of kw in textWords
+      // Find occurrences of kw in textWords
       for (let wIdx = 0; wIdx < textWords.length; wIdx++) {
-        const cleanWord = textWords[wIdx].replace(/[^a-z0-9]/g, '');
-        if (cleanWord === kw || cleanWord.startsWith(kw) && cleanWord.length <= kw.length + 2) {
+        if (wordsMatch(textWords[wIdx], kw)) {
           matchedInChunk = true;
           tokenPositions.push(wIdx);
           termMatchesCount++;
         }
       }
 
-      if (headingLower.includes(kw) || regex.test(headingLower)) {
-        matchedInChunk = true;
-        termMatchesCount += 1.5;
+      // Check heading matches
+      for (let hIdx = 0; hIdx < headingWords.length; hIdx++) {
+        if (wordsMatch(headingWords[hIdx], kw)) {
+          matchedInChunk = true;
+          termMatchesCount += 1.5;
+        }
       }
-      if (docTitleLower.includes(kw) || regex.test(docTitleLower)) {
-        termMatchesCount += 0.5;
+
+      // Check title matches
+      for (let tIdx = 0; tIdx < titleWords.length; tIdx++) {
+        if (wordsMatch(titleWords[tIdx], kw)) {
+          matchedInChunk = true;
+          termMatchesCount += 0.5;
+        }
       }
 
       if (matchedInChunk) {
@@ -298,10 +369,7 @@ export function retrieveRelevantChunks(
 
     const headingMatch =
       headingPhraseMatch ||
-      queryKeywords.some((kw) => {
-        const reg = new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i');
-        return reg.test(headingLower);
-      });
+      queryKeywords.some((kw) => headingWords.some((hw) => wordsMatch(hw, kw)));
 
     // C. Proximity span: minimum distance containing matched keywords
     let proximitySpan = 999;
@@ -360,7 +428,7 @@ export function retrieveRelevantChunks(
     isSufficient,
     insufficientReason: isSufficient
       ? undefined
-      : `I couldn't find enough information in your uploaded materials to answer this question.`,
+      : "I couldn't find enough information in your uploaded study materials to answer that question.",
     searchedChunksCount: allChunks.length,
     activeMaterialCount: eligibleMaterials.length,
   };
@@ -528,7 +596,7 @@ export function generateLocalGroundedAnswer(
     if (interactionMode === 'grounded_study') {
       const defaultGroundedMsg =
         unsupportedMessage ||
-        "I couldn't find enough information in your uploaded materials to answer this question.";
+        "I couldn't find enough information in your uploaded study materials to answer that question. You can upload relevant material or switch to Smart Tutor for a general explanation.";
 
       return {
         answer: defaultGroundedMsg,
@@ -566,23 +634,26 @@ export function generateLocalGroundedAnswer(
       ? `Slide ${chunk.slideNumber}`
       : chunk.sectionHeading);
 
-  const docRef = `[${chunk.materialTitle} — ${docAnchor}]`;
+  const docRef = `${chunk.materialTitle} (${docAnchor})`;
   const approach = preferences.teachingApproach || 'socratic';
   const isConcise = preferences.explanationLength === 'concise';
+
+  // Clean and prepare evidence excerpt
+  const evidenceExcerpt = chunk.extractedText.trim();
 
   let answer = '';
 
   if (approach === 'socratic') {
     if (isConcise) {
-      answer = `Based on your course material in **${chunk.materialTitle}** (${docAnchor}):\n\n> "${chunk.extractedText}"\n\n**Inquiry:** How does this principle apply to your current course objectives? What would happen if this constraint was altered?`;
+      answer = `Based on your course materials in **${docRef}**:\n\n${evidenceExcerpt}\n\n**Guided Question:** How does this principle directly apply to your problem, and what constraint does it impose?`;
     } else {
-      answer = `Let's explore this systematically, grounded in **${chunk.materialTitle}** (${docAnchor}).\n\nUnder **${chunk.sectionHeading}**, your uploaded text establishes:\n> "${chunk.extractedText}"\n\n### Guided Inquiry:\n1. How does this mechanism satisfy the primary requirements described in ${chunk.materialTitle}?\n2. What practical consequences or failure modes would occur if this condition were not met?`;
+      answer = `### Grounded Analysis — ${docRef}\n\nFrom your study material in **${chunk.sectionHeading}**:\n\n${evidenceExcerpt}\n\n### Guided Inquiry\n1. How does this mechanism satisfy the foundational requirements established in ${chunk.materialTitle}?\n2. What practical consequences or failure modes occur if these conditions are violated?`;
     }
   } else if (approach === 'step_by_step') {
-    answer = `### Step-by-Step Breakdown — Grounded in ${docRef}\n\n1. **Core Principle:** Grounded in ${chunk.sectionHeading}.\n2. **Verified Source Evidence:** "${chunk.extractedText}"\n3. **Application & Mechanics:** This directly establishes the verified operational rules for your course.\n\n*Reference: ${docRef}*`;
+    answer = `### Step-by-Step Breakdown — ${docRef}\n\n1. **Core Concept:** Grounded in **${chunk.sectionHeading}**.\n2. **Verified Principle:**\n${evidenceExcerpt}\n3. **Application & Rules:** This passage defines the specific criteria applicable to your syllabus.\n\n*Source Reference: ${docRef}*`;
   } else {
     // Direct
-    answer = `**Direct Explanation** (Grounded in ${docRef}):\n\nAccording to **${chunk.sectionHeading}** in ${chunk.materialTitle}:\n> "${chunk.extractedText}"\n\nThis passage directly addresses "${question}" with verified evidence from your uploaded course materials.`;
+    answer = `### Direct Explanation — ${docRef}\n\nAccording to **${chunk.sectionHeading}** in *${chunk.materialTitle}*:\n\n${evidenceExcerpt}\n\nThis material directly addresses your question based on your uploaded course notes.`;
   }
 
   // If multiple chunks retrieved, cross-reference additional source
@@ -595,7 +666,7 @@ export function generateLocalGroundedAnswer(
         : secondChunk.slideNumber
         ? `Slide ${secondChunk.slideNumber}`
         : secondChunk.sectionHeading);
-    answer += `\n\n*Additional Supporting Evidence from ${secondChunk.materialTitle} (${secondAnchor}):* "${extractVerbatimExcerpt(
+    answer += `\n\n*Supporting Material from ${secondChunk.materialTitle} (${secondAnchor}):*\n"${extractVerbatimExcerpt(
       secondChunk.extractedText,
       matches[1].matchedKeywords,
       140
