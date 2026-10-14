@@ -1,36 +1,141 @@
 @import "tailwindcss";
 
+@theme {
+  --color-background: #f8f9fa;
+  --color-surface: #f8f9fa;
+  --color-surface-dim: #e9ecef;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f8f9fa;
+  --color-surface-container: #f1f3f5;
+  --color-surface-container-high: #e9ecef;
+  --color-surface-container-highest: #dee2e6;
+  --color-on-surface: #1f2421;
+  --color-on-surface-variant: #4b5563;
+  --color-on-background: #1f2421;
+  --color-outline: #9ca3af;
+  --color-outline-variant: #e5e7eb;
+  --color-primary: #18181b;
+  --color-primary-container: #27272a;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #e4e4e7;
+  --color-secondary: #0f766e;
+  --color-secondary-container: #ccfbf1;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #115e59;
+  --color-tertiary: #b45309;
+  --color-tertiary-container: #fef3c7;
+  --color-tertiary-fixed: #fef3c7;
+  --color-tertiary-fixed-dim: #fde68a;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #92400e;
+  --color-error: #dc2626;
+  --color-error-container: #fee2e2;
+  --color-on-error: #ffffff;
+  --color-on-error-container: #991b1b;
+
+  --spacing-space-xs: 0.25rem;
+  --spacing-space-sm: 0.5rem;
+  --spacing-space-md: 1rem;
+  --spacing-space-lg: 1.5rem;
+  --spacing-space-xl: 2.5rem;
+  --spacing-gutter: 1.5rem;
+  --spacing-margin: 2rem;
+
+  --font-headline-xl: 'Inter', system-ui, sans-serif;
+  --font-headline-lg: 'Inter', system-ui, sans-serif;
+  --font-headline-md: 'Inter', system-ui, sans-serif;
+  --font-headline-sm: 'Inter', system-ui, sans-serif;
+  --font-body-lg: 'Inter', system-ui, sans-serif;
+  --font-body-md: 'Inter', system-ui, sans-serif;
+  --font-body-sm: 'Inter', system-ui, sans-serif;
+  --font-label-md: 'JetBrains Mono', monospace;
+  --font-label-sm: 'JetBrains Mono', monospace;
+  --font-code-block: 'JetBrains Mono', monospace;
+}
+
 @layer base {
-  :root {
-    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #f8f9fa;
+    color: #1f2421;
   }
 
-  body {
-    font-family: var(--font-sans);
-    background-color: #0B0F19;
-    color: #E2E8F0;
-    min-height: 100vh;
-  }
-
-  /* Custom subtle scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #0B0F19;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #1E293B;
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+  /* Academic & code typography styling */
+  code, kbd, samp, pre {
+    font-family: 'JetBrains Mono', monospace;
   }
 }
 
-/* Academic & code typography styling */
-code, kbd, samp, pre {
-  font-family: var(--font-mono);
+/* Material Symbols Outlined Icon Font */
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/materialsymbolsoutlined/v377/kJF1BvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oDMzByHX9rA6RzaxHMPdY43zj-jCxv3fzvRNU22ZXGJpEpjC_1v-p_4MrImHCIJIZrDCvHOem.ttf) format('truetype');
+  font-display: block;
 }
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined', sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  vertical-align: middle;
+}
+
+/* Custom subtle NotebookLM scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f8f9fa;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* NotebookLM warm neutral adaptations for existing sub-components */
+.bg-\[\#0B0F19\] {
+  background-color: #f8f9fa !important;
+}
+.bg-\[\#0F172A\] {
+  background-color: #ffffff !important;
+}
+.bg-\[\#131B2E\], .bg-\[\#131b2e\] {
+  background-color: #f1f3f5 !important;
+}
+.bg-slate-900, .bg-slate-900\/50, .bg-slate-900\/60, .bg-slate-900\/80 {
+  background-color: #f8f9fa !important;
+}
+.bg-slate-800, .bg-slate-800\/50, .bg-slate-800\/60, .bg-slate-800\/80 {
+  background-color: #f1f3f5 !important;
+}
+.border-slate-800, .border-slate-800\/80, .border-slate-700 {
+  border-color: #e5e7eb !important;
+}
+.text-slate-100, .text-slate-200 {
+  color: #1f2421 !important;
+}
+.text-slate-300, .text-slate-400 {
+  color: #4b5563 !important;
+}
+

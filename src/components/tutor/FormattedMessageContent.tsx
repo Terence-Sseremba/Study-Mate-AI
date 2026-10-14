@@ -76,7 +76,7 @@ const MathRenderer: React.FC<MathRendererProps> = React.memo(({ math, displayMod
 
   if (displayMode) {
     return (
-      <div className="my-3 py-3 px-4 overflow-x-auto rounded-lg bg-[#0F172A]/80 border border-slate-800 text-slate-100 flex items-center justify-center shadow-inner">
+      <div className="my-2.5 py-2.5 px-4 overflow-x-auto rounded-xl bg-neutral-50 border border-neutral-200/80 text-neutral-900 font-semibold flex items-center justify-center shadow-xs">
         <span
           className="katex-display-inner select-text"
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
@@ -87,7 +87,7 @@ const MathRenderer: React.FC<MathRendererProps> = React.memo(({ math, displayMod
 
   return (
     <span
-      className="katex-inline-inner inline-block mx-0.5 align-baseline select-text text-indigo-100"
+      className="katex-inline-inner inline-block mx-0.5 align-baseline select-text text-neutral-900 font-medium"
       dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />
   );
@@ -450,7 +450,7 @@ export const FormattedMessageContent: React.FC<FormattedMessageContentProps> = (
             renderedElements.push(
               <blockquote
                 key={`bq-${i}`}
-                className="border-l-2 border-indigo-500/70 bg-indigo-950/20 px-3 py-2 rounded-r-md text-slate-300 italic text-xs sm:text-sm my-2"
+                className="border-l-2 border-secondary bg-secondary-container/20 px-3.5 py-2.5 rounded-r-lg text-on-surface italic text-xs sm:text-sm my-2"
               >
                 {renderInlineText(trimmed.slice(2))}
               </blockquote>
@@ -461,7 +461,7 @@ export const FormattedMessageContent: React.FC<FormattedMessageContentProps> = (
           // Horizontal rule
           if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
             renderedElements.push(
-              <hr key={`hr-${i}`} className="border-slate-800 my-2.5" />
+              <hr key={`hr-${i}`} className="border-outline-variant/30 my-2.5" />
             );
             continue;
           }
@@ -476,9 +476,9 @@ export const FormattedMessageContent: React.FC<FormattedMessageContentProps> = (
             renderedElements.push(
               <div
                 key={`check-${i}`}
-                className="p-3 rounded-lg bg-indigo-950/40 border border-indigo-800/50 my-2 text-indigo-200 flex items-start gap-2.5"
+                className="p-3 rounded-xl bg-neutral-50 border border-neutral-200/80 my-2 text-neutral-800 flex items-start gap-2.5 shadow-xs"
               >
-                <HelpCircle className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                <HelpCircle className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                 <div className="flex-1 text-xs sm:text-sm leading-relaxed">
                   {renderInlineText(trimmed)}
                 </div>
@@ -508,7 +508,7 @@ export const FormattedMessageContent: React.FC<FormattedMessageContentProps> = (
 
           // Standard paragraph line
           renderedElements.push(
-            <p key={`p-${i}`} className="leading-relaxed text-slate-200">
+            <p key={`p-${i}`} className="leading-relaxed text-on-surface">
               {renderInlineText(trimmed)}
             </p>
           );

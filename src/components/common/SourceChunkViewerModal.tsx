@@ -1,5 +1,4 @@
 import React, { useEffect, useRef } from 'react';
-import { X, BookOpen, FileText, CheckCircle2, Copy, Check, ShieldCheck } from 'lucide-react';
 import type { StudyMaterial, SourceChunk, SourceCitation } from '../../types';
 
 interface SourceChunkViewerModalProps {
@@ -52,7 +51,6 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
       : 'Source Reference Chunk'
     : 'Course Document Chunks';
 
-  // Target ID of the citation or chunk being inspected
   const targetChunkId =
     selectedChunk && 'chunkId' in selectedChunk
       ? selectedChunk.chunkId
@@ -70,30 +68,30 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="source-inspector-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-on-background/40 backdrop-blur animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
-        className="bg-[#0F172A] border border-slate-800 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#131B2E]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/30 bg-surface-container-low">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 bg-indigo-950/60 border border-indigo-800/40 rounded-lg text-indigo-400 shrink-0">
-              <BookOpen className="w-5 h-5" />
+            <div className="p-2 bg-primary/10 rounded-xl text-primary shrink-0 shadow-xs">
+              <span className="material-symbols-outlined text-xl">menu_book</span>
             </div>
             <div className="min-w-0">
-              <h2 id="source-inspector-title" className="text-base font-semibold text-slate-100 flex items-center gap-2">
+              <h2 id="source-inspector-title" className="text-base font-semibold text-on-surface flex items-center gap-2">
                 <span>Source Grounding Inspector</span>
                 {citationAnchor && (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-950/80 border border-indigo-700/60 text-indigo-300">
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-semibold">
                     {citationAnchor}
                   </span>
                 )}
               </h2>
-              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 truncate">
-                <span className="font-mono text-indigo-400 shrink-0">{material?.courseCode || 'Course Material'}</span>
+              <div className="flex items-center gap-2 text-xs text-outline mt-0.5 truncate font-label-sm">
+                <span className="text-primary font-semibold shrink-0">{material?.courseCode || 'Course Material'}</span>
                 <span aria-hidden="true">·</span>
                 <span className="truncate">{title}</span>
               </div>
@@ -101,133 +99,82 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            aria-label="Close modal"
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 rounded-lg transition-colors shrink-0 ml-2"
+            className="p-1.5 rounded-lg text-outline hover:text-on-surface hover:bg-surface-container transition-colors cursor-pointer"
+            aria-label="Close dialog"
           >
-            <X className="w-5 h-5" />
+            <span className="material-symbols-outlined text-xl">close</span>
           </button>
         </div>
 
-        {/* Informational Subheader */}
-        <div className="px-6 py-3 bg-slate-900/60 border-b border-slate-800/70 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>
-              All citations link to verifiable verbatim text passages extracted from your course materials.
-            </span>
-          </div>
-          <span className="text-slate-400 font-mono text-[11px]">
-            {chunksToDisplay.length} {chunksToDisplay.length === 1 ? 'passage' : 'passages'} indexed
+        {/* Verification banner */}
+        <div className="px-6 py-2.5 bg-secondary-container/20 border-b border-secondary/20 flex items-center justify-between text-xs text-secondary font-medium">
+          <span className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-sm">verified</span>
+            Strict Verbatim Passage Index — No hallucinated grounding text
+          </span>
+          <span className="font-mono text-[11px] text-outline">
+            {chunksToDisplay.length} passage{chunksToDisplay.length !== 1 ? 's' : ''} indexed
           </span>
         </div>
 
-        {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-4">
+        {/* Chunks List */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-background">
           {chunksToDisplay.length === 0 ? (
-            <div className="text-center py-12 text-slate-500">
-              <FileText className="w-12 h-12 mx-auto mb-3 opacity-40" />
-              <p className="text-sm">No extracted chunks indexed for this document yet.</p>
+            <div className="text-center py-12 text-outline space-y-2">
+              <span className="material-symbols-outlined text-4xl text-outline/50">description</span>
+              <p className="text-sm">No extracted text chunks available for this source.</p>
             </div>
           ) : (
-            chunksToDisplay.map((chunk, idx) => {
+            chunksToDisplay.map((chunk, index) => {
+              const chunkId = 'chunkId' in chunk ? chunk.chunkId : chunk.id;
+              const isTarget = targetChunkId && chunkId === targetChunkId;
               const text = 'extractedText' in chunk ? chunk.extractedText : chunk.excerpt;
-              const heading = chunk.sectionHeading || `Section Anchor #${idx + 1}`;
-              const chunkUniqueId = 'id' in chunk ? chunk.id : `chunk-${idx}`;
-              
-              // Determine if this chunk is the active citation supporting chunk
-              const isHighlighted = Boolean(
-                targetChunkId &&
-                  ('id' in chunk
-                    ? chunk.id === targetChunkId
-                    : false)
-              );
-
-              // Compute honest source anchor label without inventing fake page numbers
-              let anchorDisplay = '';
-              const docType = material?.fileType || ('documentType' in chunk ? chunk.documentType : undefined);
-              const pNum = 'pageNumber' in chunk ? chunk.pageNumber : undefined;
-              const sNum = 'slideNumber' in chunk ? chunk.slideNumber : undefined;
-
-              if (docType === 'pdf' || (pNum !== undefined && !sNum)) {
-                anchorDisplay = `Page ${pNum ?? chunk.pageOrSlideNumber ?? idx + 1}`;
-              } else if (docType === 'pptx' || (sNum !== undefined)) {
-                anchorDisplay = `Slide ${sNum ?? chunk.pageOrSlideNumber ?? idx + 1}`;
-              } else {
-                anchorDisplay =
-                  ('anchorLabel' in chunk && chunk.anchorLabel)
-                    ? chunk.anchorLabel
-                    : `Section / Chunk ${idx + 1}`;
-              }
-
-              const docFilename =
-                material?.filename ||
-                ('filename' in chunk && chunk.filename) ||
-                material?.title ||
-                'Course Material';
+              const heading = chunk.sectionHeading || `Section ${index + 1}`;
+              const anchor =
+                chunk.anchorLabel ||
+                ('pageNumber' in chunk && chunk.pageNumber
+                  ? `Page ${chunk.pageNumber}`
+                  : `Chunk ${index + 1}`);
 
               return (
                 <div
-                  key={chunkUniqueId}
-                  ref={isHighlighted ? highlightedRef : undefined}
-                  className={`rounded-xl p-4 transition-all ${
-                    isHighlighted
-                      ? 'bg-indigo-950/40 border-2 border-indigo-500 shadow-lg shadow-indigo-950/60 ring-1 ring-indigo-400/50'
-                      : 'bg-[#0B0F19] border border-slate-800/90 hover:border-slate-700'
+                  key={chunkId || index}
+                  ref={isTarget ? highlightedRef : null}
+                  className={`rounded-xl border p-4 transition-all shadow-xs ${
+                    isTarget
+                      ? 'bg-secondary-container/20 border-secondary ring-2 ring-secondary/30'
+                      : 'bg-surface-container-lowest border-outline-variant/30 hover:border-outline-variant/60'
                   }`}
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800/60">
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-semibold text-indigo-300">{heading}</span>
-                      <span aria-hidden="true" className="text-slate-600">·</span>
-                      <span className="text-slate-300 font-mono font-medium">
-                        {anchorDisplay}
+                  <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-outline-variant/20">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full bg-surface-container text-primary font-mono text-[11px] font-semibold">
+                        {anchor}
                       </span>
-                      <span aria-hidden="true" className="text-slate-600">·</span>
-                      <span className="text-slate-400 font-mono text-[11px] truncate max-w-xs">
-                        {docFilename}
+                      <span className="text-xs font-semibold text-on-surface truncate">
+                        {heading}
                       </span>
-                      {isHighlighted && (
-                        <span className="ml-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          Supporting Evidence for Citation
+                      {isTarget && (
+                        <span className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-bold">
+                          Referenced Passage
                         </span>
                       )}
                     </div>
-
                     <button
-                      onClick={() => handleCopy(chunkUniqueId, text)}
-                      className="self-end sm:self-auto flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 transition-colors"
-                      title="Copy excerpt text"
+                      onClick={() => handleCopy(chunkId || String(index), text)}
+                      className="flex items-center gap-1 text-[11px] text-outline hover:text-primary transition-colors cursor-pointer px-2 py-1 rounded bg-surface-container-low hover:bg-surface-container"
+                      title="Copy passage text"
                     >
-                      {copiedId === chunkUniqueId ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-400">Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy</span>
-                        </>
-                      )}
+                      <span className="material-symbols-outlined text-xs">
+                        {copiedId === (chunkId || String(index)) ? 'check' : 'content_copy'}
+                      </span>
+                      <span>{copiedId === (chunkId || String(index)) ? 'Copied' : 'Copy'}</span>
                     </button>
                   </div>
 
-                  <p className="text-sm text-slate-200 leading-relaxed font-sans font-normal whitespace-pre-wrap">
+                  <p className="font-body-md text-body-md text-on-surface text-sm leading-relaxed whitespace-pre-wrap">
                     {text}
                   </p>
-
-                  <div className="mt-3 pt-2 flex items-center justify-between text-[11px] text-slate-500">
-                    <span className="flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-500/70" />
-                      <span>Verbatim extracted passage</span>
-                    </span>
-                    <span className="font-mono">
-                      {'tokenEstimate' in chunk && chunk.tokenEstimate
-                        ? `~${chunk.tokenEstimate} tokens`
-                        : `${text.length} characters`}
-                    </span>
-                  </div>
                 </div>
               );
             })
@@ -235,12 +182,13 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-slate-800 bg-[#131B2E] flex justify-end">
+        <div className="px-6 py-3 border-t border-outline-variant/30 bg-surface-container-low flex items-center justify-between text-xs text-outline">
+          <span>Verifiable attribution powered by StudyMate Grounding Index</span>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="px-4 py-1.5 rounded-full bg-primary text-on-primary hover:bg-primary-container text-xs font-semibold transition-colors cursor-pointer shadow-xs"
           >
-            Close Inspector
+            Close
           </button>
         </div>
       </div>

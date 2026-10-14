@@ -1,23 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Sliders,
-  Check,
-  RotateCcw,
-  X,
-  Sparkles,
-  ShieldCheck,
-  HelpCircle,
-  Brain,
-  MessageSquare,
-  BookOpen,
-  Info,
-} from 'lucide-react';
 import type {
   TutorPreferences,
-  TeachingApproach,
-  TutorDifficulty,
-  InteractionStyle,
-  ExplanationLength,
 } from '../../types';
 import { DEFAULT_TUTOR_PREFERENCES } from '../../lib/storage';
 
@@ -75,24 +58,24 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
 
   return (
     <div
-      className={`bg-[#0F172A] border-slate-800 flex flex-col h-full ${
-        isMobileDrawer ? 'border-t' : 'border-l w-80 lg:w-96'
+      className={`bg-surface-container-lowest flex flex-col h-full ${
+        isMobileDrawer ? 'border-t border-outline-variant/30' : 'w-full'
       }`}
     >
       {/* Panel Header */}
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#131B2E]">
+      <div className="p-4 border-b border-outline-variant/30 flex items-center justify-between bg-surface-container-low">
         <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-indigo-950/80 border border-indigo-800/50 text-indigo-400">
-            <Sliders className="w-4 h-4" />
+          <div className="p-1.5 rounded-lg bg-primary/10 text-primary shadow-xs">
+            <span className="material-symbols-outlined text-lg">tune</span>
           </div>
           <div>
-            <h2 className="text-xs sm:text-sm font-semibold text-slate-100 flex items-center gap-1.5">
-              <span>Tutor Preferences</span>
+            <h2 className="text-xs sm:text-sm font-semibold text-on-surface flex items-center gap-1.5 font-headline-sm">
+              <span>Tutor Preferences &amp; Persona</span>
               {hasUnsavedChanges && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Unsaved changes" />
+                <span className="w-1.5 h-1.5 rounded-full bg-tertiary" title="Unsaved changes" />
               )}
             </h2>
-            <p className="text-[11px] text-slate-400">Personalize pedagogy & tone</p>
+            <p className="text-[11px] text-outline font-label-sm">Personalize pedagogy, pacing, and tone</p>
           </div>
         </div>
 
@@ -100,35 +83,35 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+              className="p-1.5 text-outline hover:text-on-surface hover:bg-surface-container rounded-lg transition-colors cursor-pointer"
               title="Close preferences panel"
               aria-label="Close preferences"
             >
-              <X className="w-4 h-4" />
+              <span className="material-symbols-outlined text-lg">close</span>
             </button>
           )}
         </div>
       </div>
 
       {/* Preferences Controls Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
+      <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs bg-background">
         {/* Saved Feedback Notification */}
         {showSavedFeedback && (
-          <div className="p-2.5 rounded-lg bg-emerald-950/60 border border-emerald-800/80 text-emerald-300 flex items-center gap-2 animate-in fade-in duration-150">
-            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="font-medium text-[11px]">
-              Tutor preferences saved & applied to conversations!
+          <div className="p-2.5 rounded-lg bg-secondary-container/40 border border-secondary/30 text-secondary flex items-center gap-2 animate-in fade-in duration-150 font-medium">
+            <span className="material-symbols-outlined text-base">check_circle</span>
+            <span className="text-[11px]">
+              Tutor preferences saved &amp; applied to live conversations!
             </span>
           </div>
         )}
 
         {/* 1. Teaching Approach */}
         <div className="space-y-2">
-          <label className="font-semibold text-slate-200 flex items-center justify-between">
+          <label className="font-semibold text-on-surface flex items-center justify-between">
             <span>Teaching Approach</span>
-            <span className="text-[10px] text-slate-400 font-normal">Method</span>
+            <span className="text-[10px] text-outline font-normal font-mono">Pedagogy</span>
           </label>
-          <div className="grid grid-cols-3 gap-1.5 bg-[#0B0F19] p-1 rounded-lg border border-slate-800">
+          <div className="grid grid-cols-3 gap-1.5 bg-surface-container-low p-1 rounded-xl border border-outline-variant/30">
             {(
               [
                 { id: 'socratic', label: 'Socratic', desc: 'Asks guiding questions' },
@@ -140,10 +123,10 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
                 key={opt.id}
                 type="button"
                 onClick={() => handleUpdate('teachingApproach', opt.id)}
-                className={`py-1.5 px-2 rounded-md font-medium text-[11px] transition-all text-center ${
+                className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all text-center cursor-pointer ${
                   draft.teachingApproach === opt.id
-                    ? 'bg-indigo-950 text-indigo-300 border border-indigo-700/80 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                    ? 'bg-surface-container-lowest text-primary shadow-xs font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
                 }`}
                 title={opt.desc}
               >
@@ -151,7 +134,7 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-slate-400 leading-normal">
+          <p className="text-[11px] text-outline leading-relaxed">
             {draft.teachingApproach === 'socratic' &&
               'The tutor guides you with targeted inquiries rather than handing over direct answers immediately.'}
             {draft.teachingApproach === 'step_by_step' &&
@@ -163,14 +146,14 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
 
         {/* 2. Difficulty Level */}
         <div className="space-y-2">
-          <label className="font-semibold text-slate-200 flex items-center justify-between">
+          <label className="font-semibold text-on-surface flex items-center justify-between">
             <span>Difficulty Level</span>
-            <span className="text-[10px] text-slate-400 font-normal">Academic Depth</span>
+            <span className="text-[10px] text-outline font-normal font-mono">Academic Depth</span>
           </label>
-          <div className="grid grid-cols-3 gap-1.5 bg-[#0B0F19] p-1 rounded-lg border border-slate-800">
+          <div className="grid grid-cols-3 gap-1.5 bg-surface-container-low p-1 rounded-xl border border-outline-variant/30">
             {(
               [
-                { id: 'beginner', label: 'Beginner', desc: 'Intuitive & introductory' },
+                { id: 'beginner', label: 'Foundational', desc: 'Intuitive & introductory' },
                 { id: 'intermediate', label: 'Intermediate', desc: 'Standard college-level' },
                 { id: 'advanced', label: 'Advanced', desc: 'Rigorous & edge-case' },
               ] as const
@@ -179,10 +162,10 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
                 key={opt.id}
                 type="button"
                 onClick={() => handleUpdate('difficultyLevel', opt.id)}
-                className={`py-1.5 px-2 rounded-md font-medium text-[11px] transition-all text-center ${
+                className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all text-center cursor-pointer ${
                   draft.difficultyLevel === opt.id
-                    ? 'bg-indigo-950 text-indigo-300 border border-indigo-700/80 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                    ? 'bg-surface-container-lowest text-primary shadow-xs font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
                 }`}
                 title={opt.desc}
               >
@@ -194,26 +177,26 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
 
         {/* 3. Interaction Style */}
         <div className="space-y-2">
-          <label className="font-semibold text-slate-200 flex items-center justify-between">
-            <span>Interaction Style</span>
-            <span className="text-[10px] text-slate-400 font-normal">Tone</span>
+          <label className="font-semibold text-on-surface flex items-center justify-between">
+            <span>Interaction Tone</span>
+            <span className="text-[10px] text-outline font-normal font-mono">Vibe</span>
           </label>
-          <div className="grid grid-cols-3 gap-1.5 bg-[#0B0F19] p-1 rounded-lg border border-slate-800">
+          <div className="grid grid-cols-3 gap-1.5 bg-surface-container-low p-1 rounded-xl border border-outline-variant/30">
             {(
               [
-                { id: 'gentle', label: 'Gentle', desc: 'Supportive & patient' },
-                { id: 'balanced', label: 'Balanced', desc: 'Constructive partnership' },
-                { id: 'rigorous', label: 'Rigorous', desc: 'Demanding & analytical' },
+                { id: 'gentle', label: 'Gentle', desc: 'Supportive & encouraging' },
+                { id: 'balanced', label: 'Balanced', desc: 'Focused study partner' },
+                { id: 'rigorous', label: 'Rigorous', desc: 'Direct & exacting critique' },
               ] as const
             ).map((opt) => (
               <button
                 key={opt.id}
                 type="button"
                 onClick={() => handleUpdate('interactionStyle', opt.id)}
-                className={`py-1.5 px-2 rounded-md font-medium text-[11px] transition-all text-center ${
+                className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all text-center cursor-pointer ${
                   draft.interactionStyle === opt.id
-                    ? 'bg-indigo-950 text-indigo-300 border border-indigo-700/80 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                    ? 'bg-surface-container-lowest text-primary shadow-xs font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
                 }`}
                 title={opt.desc}
               >
@@ -225,26 +208,27 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
 
         {/* 4. Explanation Length */}
         <div className="space-y-2">
-          <label className="font-semibold text-slate-200 flex items-center justify-between">
-            <span>Explanation Length</span>
-            <span className="text-[10px] text-slate-400 font-normal">Density</span>
+          <label className="font-semibold text-on-surface flex items-center justify-between">
+            <span>Response Length</span>
+            <span className="text-[10px] text-outline font-normal font-mono">Verbosity</span>
           </label>
-          <div className="grid grid-cols-2 gap-1.5 bg-[#0B0F19] p-1 rounded-lg border border-slate-800">
+          <div className="grid grid-cols-2 gap-1.5 bg-surface-container-low p-1 rounded-xl border border-outline-variant/30">
             {(
               [
-                { id: 'concise', label: 'Concise (High-Yield)' },
-                { id: 'detailed', label: 'Detailed (Deep Dive)' },
+                { id: 'concise', label: 'Concise (High-Yield)', desc: 'Bullet points & summaries' },
+                { id: 'detailed', label: 'Comprehensive', desc: 'Thorough derivations' },
               ] as const
             ).map((opt) => (
               <button
                 key={opt.id}
                 type="button"
                 onClick={() => handleUpdate('explanationLength', opt.id)}
-                className={`py-1.5 px-2 rounded-md font-medium text-[11px] transition-all text-center ${
+                className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all text-center cursor-pointer ${
                   draft.explanationLength === opt.id
-                    ? 'bg-indigo-950 text-indigo-300 border border-indigo-700/80 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                    ? 'bg-surface-container-lowest text-primary shadow-xs font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
                 }`}
+                title={opt.desc}
               >
                 {opt.label}
               </button>
@@ -253,23 +237,23 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
         </div>
 
         {/* 5. Knowledge Checks Toggle */}
-        <div className="bg-[#0B0F19] border border-slate-800 rounded-lg p-3 space-y-1.5">
+        <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3.5 space-y-1.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-slate-200">Knowledge Checks</span>
+            <span className="font-semibold text-on-surface">Interactive Knowledge Checks</span>
             <button
               type="button"
               role="switch"
               aria-checked={draft.enableKnowledgeChecks}
               onClick={() => handleUpdate('enableKnowledgeChecks', !draft.enableKnowledgeChecks)}
-              className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
-                draft.enableKnowledgeChecks ? 'bg-indigo-600 justify-end' : 'bg-slate-800 justify-start'
+              className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
+                draft.enableKnowledgeChecks ? 'bg-primary justify-end' : 'bg-outline-variant/50 justify-start'
               }`}
             >
               <div className="w-4 h-4 rounded-full bg-white shadow-sm" />
             </button>
           </div>
-          <p className="text-[11px] text-slate-400 leading-normal">
-            When enabled, the tutor occasionally poses a quick question at the end of answers to confirm your understanding.
+          <p className="text-[11px] text-outline leading-relaxed">
+            When enabled, the tutor occasionally poses a quick conceptual quiz at the end of explanations to confirm retention.
           </p>
         </div>
 
@@ -278,76 +262,72 @@ export const TutorPreferencesPanel: React.FC<TutorPreferencesPanelProps> = ({
           <div className="flex items-center justify-between">
             <label
               htmlFor="custom-tutor-instructions"
-              className="font-semibold text-slate-200"
+              className="font-semibold text-on-surface"
             >
               Custom instructions for your tutor
             </label>
             <span
               className={`text-[10px] font-mono ${
-                isOverLimit ? 'text-rose-400 font-bold' : 'text-slate-400'
+                isOverLimit ? 'text-error font-bold' : 'text-outline'
               }`}
             >
               {customLength}/{MAX_CUSTOM_INSTRUCTIONS_LENGTH}
             </span>
           </div>
 
-          <p className="text-[11px] text-slate-400 leading-normal">
-            Tell your tutor how you want to learn. For example, ask it to challenge your assumptions, give hints before answers, use analogies, or quiz you on difficult concepts.
-          </p>
-
           <textarea
             id="custom-tutor-instructions"
-            rows={4}
+            rows={3}
             value={draft.customInstructions}
             onChange={(e) => handleUpdate('customInstructions', e.target.value)}
-            placeholder="e.g., Focus on intuitive analogies before mathematical formulas; quiz me after discussing key mechanisms; never give away final solutions immediately—offer progressive hints."
-            className="w-full bg-[#0B0F19] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none transition-colors"
+            placeholder="e.g., Focus on intuitive analogies before formulas; quiz me on edge cases; offer progressive hints before full solutions."
+            className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl p-3 text-xs text-on-surface placeholder-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 resize-none transition-colors leading-relaxed"
           />
           {isOverLimit && (
-            <p className="text-[11px] text-rose-400">
+            <p className="text-[11px] text-error">
               Instructions exceed the 1,000 character maximum. Please shorten them.
             </p>
           )}
         </div>
 
         {/* Non-Negotiable Rules Notice */}
-        <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 space-y-1 text-[11px] text-slate-400">
-          <div className="flex items-center gap-1.5 font-medium text-slate-300">
-            <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Non-Negotiable Tutoring Axioms</span>
+        <div className="p-3 rounded-xl bg-surface-container-low border border-outline-variant/20 space-y-1 text-[11px] text-outline">
+          <div className="flex items-center gap-1.5 font-medium text-on-surface">
+            <span className="material-symbols-outlined text-sm text-secondary">verified_user</span>
+            <span>Academic Grounding Axiom</span>
           </div>
           <p className="leading-relaxed">
-            Your preferences customize pedagogy, pace, and tone. However, the tutor always strictly grounds answers in course passages, cites genuine citations, and never fabricates sources.
+            Preferences personalize tone and structure. However, StudyMate AI always strictly grounds answers in course passages and never fabricates citations.
           </p>
         </div>
       </div>
 
       {/* Panel Action Footer */}
-      <div className="p-4 border-t border-slate-800 bg-[#131B2E] space-y-2">
+      <div className="p-4 border-t border-outline-variant/30 bg-surface-container-low space-y-2">
         <button
           type="button"
           disabled={isOverLimit}
           onClick={() => handleSave()}
-          className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white rounded-lg text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+          className="w-full py-2.5 px-4 bg-primary hover:bg-primary-container disabled:opacity-40 text-on-primary rounded-xl text-xs font-semibold shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
         >
-          <Check className="w-3.5 h-3.5" />
-          <span>Save preferences</span>
+          <span className="material-symbols-outlined text-base">check</span>
+          <span>Save Preferences</span>
         </button>
 
-        <div className="flex items-center justify-between pt-1 text-[11px]">
+        <div className="flex items-center justify-between pt-1 text-[11px] text-outline">
           <button
             type="button"
             onClick={handleResetToDefaults}
-            className="text-slate-400 hover:text-slate-200 flex items-center gap-1 transition-colors"
+            className="hover:text-on-surface flex items-center gap-1 transition-colors cursor-pointer"
           >
-            <RotateCcw className="w-3 h-3" />
+            <span className="material-symbols-outlined text-xs">restart_alt</span>
             <span>Reset to defaults</span>
           </button>
 
           {hasUnsavedChanges ? (
-            <span className="text-amber-400 text-[10px] font-mono">Unsaved changes</span>
+            <span className="text-tertiary text-[10px] font-mono">Unsaved changes</span>
           ) : (
-            <span className="text-slate-400 text-[10px] font-mono">Preferences synced</span>
+            <span className="text-secondary text-[10px] font-mono">Preferences synced</span>
           )}
         </div>
       </div>

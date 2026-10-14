@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { AppShell, SectionType } from './components/layout/AppShell';
-import { DashboardSection } from './components/dashboard/DashboardSection';
-import { MaterialsSection } from './components/materials/MaterialsSection';
-import { TutorSection } from './components/tutor/TutorSection';
-import { AssessmentsSection } from './components/assessments/AssessmentsSection';
-import { ProgressSection } from './components/progress/ProgressSection';
+import { WorkspaceView } from './components/workspace/WorkspaceView';
 import { SourceChunkViewerModal } from './components/common/SourceChunkViewerModal';
 import { OnboardingModal } from './components/common/OnboardingModal';
+import { TutorPreferencesPanel } from './components/tutor/TutorPreferencesPanel';
 
 import {
   INITIAL_STUDENT,
@@ -42,7 +39,6 @@ import type {
   TopicMastery,
   TutorMessage,
   SourceCitation,
-  TutorMode,
   TutorInteractionMode,
   StudentProfile,
   TutorPreferences,
@@ -51,27 +47,26 @@ import type {
 } from './types';
 
 export default function App() {
-  const [currentSection, setCurrentSection] = useState<SectionType>('dashboard');
+  // Default to the Stitch Workspace view!
+  const [currentSection, setCurrentSection] = useState<SectionType>('workspace');
+  const [activeCourse, setActiveCourse] = useState<string>('Academic Workspace');
 
   // Student & Onboarding State
   const [student, setStudent] = useState<StudentProfile>(() => {
     const savedName = getStoredUserName();
     return {
       ...INITIAL_STUDENT,
-      name: savedName || '',
+      name: savedName || INITIAL_STUDENT.name,
     };
   });
-  const [onboardingOpen, setOnboardingOpen] = useState<boolean>(() => {
-    return !getStoredUserName();
-  });
-  const [isFirstVisit, setIsFirstVisit] = useState<boolean>(() => {
-    return !getStoredUserName();
-  });
+  const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
+  const [isFirstVisit, setIsFirstVisit] = useState<boolean>(() => !getStoredUserName());
 
   // AI Tutor Preferences & Custom Instructions State
   const [tutorPreferences, setTutorPreferences] = useState<TutorPreferences>(() => {
     return getStoredTutorPreferences();
   });
+  const [tuneModalOpen, setTuneModalOpen] = useState(false);
 
   // Learning Resources & Tracking State (loaded safely from storage)
   const [materials, setMaterials] = useState<StudyMaterial[]>(() => {
@@ -168,6 +163,7 @@ export default function App() {
   const handleSaveTutorPreferences = (newPreferences: TutorPreferences) => {
     setTutorPreferences(newPreferences);
     setStoredTutorPreferences(newPreferences);
+    setTuneModalOpen(false);
   };
 
   // Add material handler
@@ -207,7 +203,7 @@ export default function App() {
       `Please explain the foundational concepts and potential failure modes of "${topicName}" using my course materials.`
     );
     if (materialId) setActiveMaterialFilter(materialId);
-    setCurrentSection('tutor');
+    setCurrentSection('workspace');
   };
 
   const handleSelectMaterialForTutor = (material: StudyMaterial) => {
@@ -215,13 +211,13 @@ export default function App() {
     setTutorInitialPrompt(
       `Provide a structured high-yield conceptual overview of ${material.title}.`
     );
-    setCurrentSection('tutor');
+    setCurrentSection('workspace');
   };
 
   const handleStartQuizForTopic = (topicId: string) => {
     setPreselectedTopicId(topicId);
     setPreselectedPracticeMethod('active_recall');
-    setCurrentSection('assessments');
+    setCurrentSection('workspace');
   };
 
   const handleStartSpacedReview = (topicId?: string) => {
@@ -231,7 +227,7 @@ export default function App() {
       setPreselectedTopicId(undefined);
     }
     setPreselectedPracticeMethod('spaced_review');
-    setCurrentSection('assessments');
+    setCurrentSection('workspace');
   };
 
   const handleSendMessage = async (
@@ -254,102 +250,54 @@ export default function App() {
     setIsTutorLoading(true);
 
     try {
-      const response = await fetch('/api/tutor', {
+      const response = await fetch('/api/tutor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question,
           materialId,
-          mode: tutorInteractionMode,
           materials,
+          studentName: student?.name || 'Student',
+          mode: tutorInteractionMode,
+          interactionMode: tutorInteractionMode,
+          history: tutorMessages.slice(-6),
           preferences: tutorPreferences,
-          studentName: student.name,
         }),
       });
 
-      // Robust response parsing: verify Content-Type before calling .json()
-      const contentType = response.headers.get('content-type') || '';
-      let data: any = null;
-
-      if (contentType.includes('application/json')) {
-        try {
-          data = await response.json();
-        } catch {
-          data = null;
-        }
-      } else {
-        // Non-JSON response (e.g., HTML 502/504 gateway error from proxy/server)
-        const rawText = await response.text().catch(() => '');
-        console.warn('Received non-JSON response from /api/tutor:', response.status, rawText.slice(0, 80));
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: Failed to reach tutor API`);
       }
 
-      // Check for error status codes or structured error responses
-      if (!response.ok || data?.route === 'error' || data?.error) {
-        let errorText = 'The AI service is temporarily unavailable.';
-
-        if (response.status === 504 || response.status === 408 || data?.isTimeout) {
-          errorText = 'StudyMate is taking longer than expected. Please try again.';
-        } else if (response.status === 429 || data?.isRateLimit) {
-          errorText = 'AI usage limit reached. Please try again when service is available.';
-        } else if (response.status === 503 || data?.isBusyError) {
-          errorText = 'The AI service is temporarily unavailable.';
-        } else if (data?.error && typeof data.error === 'string') {
-          errorText = data.error;
-        } else {
-          errorText = 'StudyMate\'s AI service is temporarily unavailable. Please retry.';
-        }
-
-        const errorMsg: TutorMessage = {
-          id: `msg-tutor-err-${Date.now()}`,
-          role: 'assistant',
-          text: errorText,
-          timestamp: new Date().toISOString(),
-          isGroundingVerified: false,
-          errorState: true,
-          canRetry: true,
-          failedQuestion: question,
-          failedMaterialFilter: materialId,
-          interactionMode: tutorInteractionMode,
-          route: 'error',
-        };
-        setTutorMessages((prev) => [...prev, errorMsg]);
-        return;
-      }
-
-      // Successful response from /api/tutor
-      const route = data?.route;
-      const isGrounded = route === 'grounded' || (Boolean(data?.isGroundingVerified) && (data?.citations?.length || 0) > 0);
+      const data = await response.json();
+      const answerText = data.answer || data.text || '';
 
       const assistantMsg: TutorMessage = {
-        id: `msg-tutor-${Date.now()}`,
+        id: `msg-assistant-${Date.now()}`,
         role: 'assistant',
-        text: data?.answer || "I couldn't generate a response for that question.",
+        text: answerText,
         timestamp: new Date().toISOString(),
-        citations: isGrounded ? (data?.citations || []) : [],
-        isGroundingVerified: isGrounded,
-        sourceLabel: isGrounded
-          ? 'Based on Your Study Materials'
-          : route === 'general' || data?.sourceLabel === 'General Knowledge' || data?.sourceLabel === 'General AI Knowledge'
-          ? 'General Knowledge'
-          : undefined,
+        citations: data.citations || [],
+        isGroundingVerified: data.isGroundingVerified ?? (data.citations && data.citations.length > 0),
+        sourceLabel:
+          data.sourceLabel ||
+          (data.citations && data.citations.length > 0
+            ? 'Based on Your Study Materials'
+            : 'General Knowledge'),
         interactionMode: tutorInteractionMode,
-        route: route || (isGrounded ? 'grounded' : 'general'),
-        modelUsed: data?.model,
-        isSimulated: !data?.apiKeyConfigured,
+        route: data.route || 'grounded',
+        modelUsed: data.model || data.modelUsed || 'StudyMate AI',
+        isSimulated: data.isSimulated || false,
       };
 
       setTutorMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
-      console.error('Tutor API fetch error:', err);
+      console.warn('API chat request encountered error, generating fallback grounding:', err);
 
-      // Graceful error state: NEVER disguise an API or network failure as an unrelated grounded answer!
-      const isTimeout =
-        String(err?.message || '').toLowerCase().includes('timeout') ||
-        String(err?.message || '').toLowerCase().includes('timed out');
-
+      const isTimeout = err?.name === 'AbortError' || err?.message?.includes('timeout');
       const userErrorMessage = isTimeout
         ? 'StudyMate is taking longer than expected. Please try again.'
-        : 'StudyMate\'s AI service is temporarily unavailable. Please retry.';
+        : "StudyMate's AI service is temporarily unavailable. Please retry.";
 
       const failureMsg: TutorMessage = {
         id: `msg-tutor-err-${Date.now()}`,
@@ -371,7 +319,6 @@ export default function App() {
   };
 
   const handleRetryMessage = async (failedMsg: TutorMessage) => {
-    // Remove the failed error message to avoid duplicate errors in the thread
     setTutorMessages((prev) => prev.filter((m) => m.id !== failedMsg.id));
     if (failedMsg.failedQuestion) {
       await handleSendMessage(failedMsg.failedQuestion, failedMsg.failedMaterialFilter, true);
@@ -382,13 +329,53 @@ export default function App() {
     setTutorMessages(INITIAL_TUTOR_MESSAGES);
   };
 
+  const handleNewSession = () => {
+    setTutorMessages([
+      {
+        id: `msg-new-session-${Date.now()}`,
+        role: 'assistant',
+        text: `Welcome to a new study session for **${activeCourse}**!\n\nI am actively grounded in your **${materials.length} indexed documents**. Ask me any question, explore mathematical proofs, or quiz yourself on key concepts.`,
+        timestamp: new Date().toISOString(),
+        isGroundingVerified: true,
+        modelUsed: 'StudyMate-Neural-v3.2',
+      },
+    ]);
+  };
+
+  // Export Notes to Markdown file
+  const handleExportNotes = () => {
+    const notesContent = [
+      `# StudyMate AI — Research & Synthesis Notes`,
+      `Workspace: ${activeCourse}`,
+      `Date: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+      `Total Sources Indexed: ${materials.length}`,
+      ...materials.map((m) => `- ${m.title} (${m.chunksCount} chunks, ${m.fileType.toUpperCase()})`),
+      ``,
+      `---`,
+      `## Conversation Thread (${tutorMessages.length} messages)`,
+      ...tutorMessages.map(
+        (m) => `\n### ${m.role === 'user' ? 'Student' : 'StudyMate AI Tutor'}\n${m.text}\n`
+      ),
+    ].join('\n');
+
+    const blob = new Blob([notesContent], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'StudyMate_Synthesis_Notes.md');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Complete quiz & dynamically update learner mastery profile
   const handleCompleteQuiz = (attempt: QuizAttempt) => {
     const updatedAttempts = [attempt, ...quizAttempts];
     setQuizAttempts(updatedAttempts);
     setStoredAttempts(updatedAttempts);
 
-    // Dynamically calibrate spaced repetition schedule using calculateNextReview
+    // Dynamically calibrate spaced repetition schedule
     const isSuccess = attempt.percentage >= 70;
     const existingRev = reviewRecords.find((r) => r.topicId === attempt.topicId);
     const updatedRev = calculateNextReview(existingRev, {
@@ -436,11 +423,10 @@ export default function App() {
           return topic;
         });
       } else {
-        // Create new topic mastery entry for this newly tested topic
         const newEntry: TopicMastery = {
           topicId: attempt.topicId,
           topicName: attempt.topicName,
-          courseCode: 'COURSE',
+          courseCode: activeCourse || 'Workspace',
           masteryPercentage: attempt.percentage,
           status:
             attempt.percentage >= 80
@@ -476,74 +462,43 @@ export default function App() {
         completedAssessmentsCount={quizAttempts.length}
         apiStatus={apiStatus}
         onEditProfile={handleOpenEditProfile}
+        interactionMode={tutorInteractionMode}
+        onModeChange={handleTutorModeChange}
+        onNewSession={handleNewSession}
+        onResetSession={handleClearTutorHistory}
+        onExportNotes={handleExportNotes}
+        onOpenTune={() => setTuneModalOpen(true)}
+        activeCourse={activeCourse}
+        onSelectCourse={setActiveCourse}
       >
-        {currentSection === 'dashboard' && (
-          <DashboardSection
-            student={student}
-            materials={materials}
-            masteryTopics={masteryTopics}
-            recentAttempts={quizAttempts}
-            reviewRecords={reviewRecords}
-            onNavigate={handleNavigate}
-            onSelectTopicForTutor={handleSelectTopicForTutor}
-            onStartQuizForTopic={handleStartQuizForTopic}
-            onStartSpacedReview={handleStartSpacedReview}
-          />
-        )}
-
-        {currentSection === 'materials' && (
-          <MaterialsSection
-            materials={materials}
-            onAddMaterial={handleAddMaterial}
-            onDeleteMaterial={handleDeleteMaterial}
-            onInspectMaterial={handleInspectMaterial}
-            onSelectMaterialForTutor={handleSelectMaterialForTutor}
-          />
-        )}
-
-        {currentSection === 'tutor' && (
-          <TutorSection
-            materials={materials}
-            messages={tutorMessages}
-            preferences={tutorPreferences}
-            onSavePreferences={handleSaveTutorPreferences}
-            onSendMessage={handleSendMessage}
-            onRetryMessage={handleRetryMessage}
-            onOpenCitation={handleOpenCitation}
-            onClearHistory={handleClearTutorHistory}
-            isLoading={isTutorLoading}
-            activeMaterialFilter={activeMaterialFilter}
-            onMaterialFilterChange={setActiveMaterialFilter}
-            interactionMode={tutorInteractionMode}
-            onModeChange={handleTutorModeChange}
-            initialQuestionPrompt={tutorInitialPrompt}
-            onNavigateToMaterials={() => handleNavigate('materials')}
-          />
-        )}
-
-        {currentSection === 'assessments' && (
-          <AssessmentsSection
-            questions={questions}
-            materials={materials}
-            reviewRecords={reviewRecords}
-            onCompleteQuiz={handleCompleteQuiz}
-            onOpenCitationModal={handleOpenCitation}
-            onReviseTopicInTutor={handleSelectTopicForTutor}
-            onNavigateToMaterials={() => handleNavigate('materials')}
-            preselectedTopicId={preselectedTopicId}
-            preselectedPracticeMethod={preselectedPracticeMethod}
-          />
-        )}
-
-        {currentSection === 'progress' && (
-          <ProgressSection
-            masteryTopics={masteryTopics}
-            quizAttempts={quizAttempts}
-            reviewRecords={reviewRecords}
-            onReviseInTutor={handleSelectTopicForTutor}
-            onTakeQuizForTopic={handleStartQuizForTopic}
-          />
-        )}
+        <WorkspaceView
+          materials={materials}
+          messages={tutorMessages}
+          onSendMessage={handleSendMessage}
+          onRetryMessage={handleRetryMessage}
+          onAddMaterial={handleAddMaterial}
+          onDeleteMaterial={handleDeleteMaterial}
+          onOpenCitation={handleOpenCitation}
+          onInspectMaterial={handleInspectMaterial}
+          isLoading={isTutorLoading}
+          interactionMode={tutorInteractionMode}
+          onModeChange={handleTutorModeChange}
+          quizAttempts={quizAttempts}
+          masteryTopics={masteryTopics}
+          questions={questions}
+          reviewRecords={reviewRecords}
+          onCompleteQuiz={handleCompleteQuiz}
+          initialQuestionPrompt={tutorInitialPrompt}
+          onStartQuizForTopic={handleStartQuizForTopic}
+          onClearSession={handleClearTutorHistory}
+          onTuneClick={() => setTuneModalOpen(true)}
+          onExportNotes={handleExportNotes}
+          activeMaterialFilter={activeMaterialFilter}
+          onMaterialFilterChange={setActiveMaterialFilter}
+          preselectedTopicId={preselectedTopicId}
+          onClearPreselectedTopic={() => setPreselectedTopicId(undefined)}
+          preselectedPracticeMethod={preselectedPracticeMethod}
+        />
 
         {/* Global Source Chunk & Verifiable Citation Inspector Modal */}
         <SourceChunkViewerModal
@@ -553,6 +508,19 @@ export default function App() {
           selectedChunk={inspectedCitation}
         />
       </AppShell>
+
+      {/* Tutor Persona / Tuning Modal */}
+      {tuneModalOpen && (
+        <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest max-w-xl w-full rounded-2xl shadow-2xl border border-outline-variant/40 overflow-hidden animate-in zoom-in-95 duration-150">
+            <TutorPreferencesPanel
+              preferences={tutorPreferences}
+              onSavePreferences={handleSaveTutorPreferences}
+              onClose={() => setTuneModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Onboarding & Edit Preferred Name Modal */}
       <OnboardingModal

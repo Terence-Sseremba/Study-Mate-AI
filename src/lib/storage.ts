@@ -25,7 +25,8 @@ export function getStoredUserName(): string | null {
   if (!isStorageAvailable()) return null;
   try {
     const val = window.localStorage.getItem(STORAGE_KEY_NAME);
-    return val && val.trim().length > 0 ? val.trim() : null;
+    if (!val || val.trim().length === 0 || val.trim() === 'Alex Chen') return null;
+    return val.trim();
   } catch {
     return null;
   }
@@ -45,7 +46,14 @@ export function getStoredMaterials(): StudyMaterial[] {
   if (!isStorageAvailable()) return [];
   try {
     const data = window.localStorage.getItem(STORAGE_KEY_MATERIALS);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    const list: StudyMaterial[] = JSON.parse(data);
+    // Filter out legacy sample materials
+    const cleaned = list.filter((m) => !m.id.startsWith('mat-cs229'));
+    if (cleaned.length !== list.length) {
+      setStoredMaterials(cleaned);
+    }
+    return cleaned;
   } catch {
     return [];
   }
@@ -64,7 +72,13 @@ export function getStoredAttempts(): QuizAttempt[] {
   if (!isStorageAvailable()) return [];
   try {
     const data = window.localStorage.getItem(STORAGE_KEY_ATTEMPTS);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    const list: QuizAttempt[] = JSON.parse(data);
+    const cleaned = list.filter((a) => !a.id.startsWith('attempt-cs229'));
+    if (cleaned.length !== list.length) {
+      setStoredAttempts(cleaned);
+    }
+    return cleaned;
   } catch {
     return [];
   }
@@ -83,7 +97,13 @@ export function getStoredMastery(): TopicMastery[] {
   if (!isStorageAvailable()) return [];
   try {
     const data = window.localStorage.getItem(STORAGE_KEY_MASTERY);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    const list: TopicMastery[] = JSON.parse(data);
+    const cleaned = list.filter((t) => !t.topicId.startsWith('topic-cs229') && !t.topicId.startsWith('topic-convex') && !t.topicId.startsWith('topic-backprop') && !t.topicId.startsWith('topic-lr') && !t.topicId.startsWith('topic-hessian'));
+    if (cleaned.length !== list.length) {
+      setStoredMastery(cleaned);
+    }
+    return cleaned;
   } catch {
     return [];
   }

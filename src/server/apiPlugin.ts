@@ -1,4 +1,6 @@
 import type { Plugin, ViteDevServer } from 'vite';
+import fs from 'fs';
+import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import type { StudyMaterial, TutorPreferences, TutorInteractionMode } from '../types/index.ts';
 import { buildEffectiveTutorInstructions } from '../lib/tutorInstructions.ts';
@@ -8,6 +10,32 @@ import {
   generateLocalGroundedAnswer,
 } from '../lib/documentRetrieval.ts';
 import { generateContentWithRetry } from './geminiResilience.ts';
+
+/**
+ * Retrieves the Gemini API key from process.env or directly from the .env file if needed.
+ */
+function getGeminiApiKey(): string | undefined {
+  if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY') {
+    return process.env.GEMINI_API_KEY;
+  }
+  try {
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf-8');
+      const match = content.match(/^GEMINI_API_KEY\s*=\s*(.+)$/m);
+      if (match && match[1]) {
+        const val = match[1].trim().replace(/^['"]|['"]$/g, '');
+        if (val && val !== 'MY_GEMINI_API_KEY') {
+          process.env.GEMINI_API_KEY = val;
+          return val;
+        }
+      }
+    }
+  } catch {
+    // Ignore file read errors
+  }
+  return undefined;
+}
 
 /**
  * Vite Dev Server plugin providing server-side API endpoints for StudyMate AI.
@@ -22,9 +50,8 @@ export function studyMateApiPlugin(): Plugin {
 
         // 1. GET /api/status - Check backend status and Gemini API key availability
         if (url === '/api/status' && req.method === 'GET') {
-          const hasApiKey = Boolean(
-            process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
-          );
+          const apiKey = getGeminiApiKey();
+          const hasApiKey = Boolean(apiKey);
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.end(
             JSON.stringify({
@@ -38,8 +65,8 @@ export function studyMateApiPlugin(): Plugin {
           return;
         }
 
-        // 2. POST /api/tutor - Intelligent Tutor Routing, Relevance Validation & Resilient Answering
-        if (url === '/api/tutor' && req.method === 'POST') {
+        // 2. POST /api/tutor or /api/tutor/chat - Intelligent Tutor Routing, Relevance Validation & Resilient Answering
+        if ((url === '/api/tutor' || url === '/api/tutor/chat') && req.method === 'POST') {
           let body = '';
           req.on('data', (chunk) => {
             body += chunk;
@@ -67,9 +94,12 @@ export function studyMateApiPlugin(): Plugin {
                 materials = [],
                 preferences,
                 studentName,
-                mode = 'smart_tutor', // 'smart_tutor' | 'grounded_study'
+                mode: rawMode,
+                interactionMode,
                 simulateError, // For controlled resilience testing
               } = data;
+
+              const mode = rawMode || interactionMode || 'smart_tutor';
 
               if (!question || typeof question !== 'string' || !question.trim()) {
                 sendJson(400, { error: 'Question is required', route: 'error' });
@@ -120,9 +150,8 @@ export function studyMateApiPlugin(): Plugin {
               const tutorMode: TutorInteractionMode =
                 mode === 'grounded_study' ? 'grounded_study' : 'smart_tutor';
               const userMaterials: StudyMaterial[] = Array.isArray(materials) ? materials : [];
-              const hasApiKey = Boolean(
-                process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
-              );
+              const apiKey = getGeminiApiKey();
+              const hasApiKey = Boolean(apiKey);
 
               // Build effective system instructions using our dedicated module
               const effectiveSystemPrompt = preferences
@@ -200,7 +229,7 @@ ${excerptsBlock}
 5. Explicitly reference the document title and source anchor (e.g. Page X, Slide Y, or Section).
 6. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).`;
 
-                  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                  const ai = new GoogleGenAI({ apiKey: apiKey! });
                   const callResult = await generateContentWithRetry(ai, {
                     model: 'gemini-3.8-flash',
                     contents: question,
@@ -218,6 +247,7 @@ ${excerptsBlock}
                       sendJson(200, {
                         route: 'insufficient',
                         answer: "I couldn't find enough information in your uploaded study materials to answer that question. You can upload relevant material or switch to Smart Tutor for a general explanation.",
+                        text: "I couldn't find enough information in your uploaded study materials to answer that question. You can upload relevant material or switch to Smart Tutor for a general explanation.",
                         citations: [],
                         grounded: false,
                         isGroundingVerified: false,
@@ -231,6 +261,7 @@ ${excerptsBlock}
                     sendJson(200, {
                       route: 'grounded',
                       answer: text || 'No response generated.',
+                      text: text || 'No response generated.',
                       citations,
                       grounded: true,
                       isGroundingVerified: true,
@@ -264,6 +295,7 @@ ${excerptsBlock}
                 sendJson(200, {
                   route: 'grounded',
                   answer: localResult.answer,
+                  text: localResult.answer,
                   citations,
                   grounded: true,
                   isGroundingVerified: true,
@@ -313,7 +345,7 @@ ${excerptsBlock}
 4. Explicitly reference the document title and source anchor (e.g. Page X, Slide Y, or Section).
 5. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).`;
 
-                  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                  const ai = new GoogleGenAI({ apiKey: apiKey! });
                   const callResult = await generateContentWithRetry(ai, {
                     model: 'gemini-3.8-flash',
                     contents: question,
@@ -331,6 +363,7 @@ ${excerptsBlock}
                       sendJson(200, {
                         route: 'grounded',
                         answer: text || 'No response generated.',
+                        text: text || 'No response generated.',
                         citations,
                         grounded: true,
                         isGroundingVerified: true,
@@ -364,6 +397,7 @@ ${excerptsBlock}
                   sendJson(200, {
                     route: 'grounded',
                     answer: localResult.answer,
+                    text: localResult.answer,
                     citations,
                     grounded: true,
                     isGroundingVerified: true,
@@ -391,7 +425,7 @@ STRICT INTEGRITY DIRECTIVES:
 3. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).
 4. Do NOT fabricate citations or claim this came from course files.`;
 
-                const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                const ai = new GoogleGenAI({ apiKey: apiKey! });
                 const callResult = await generateContentWithRetry(ai, {
                   model: 'gemini-3.8-flash',
                   contents: question,
@@ -406,6 +440,7 @@ STRICT INTEGRITY DIRECTIVES:
                   sendJson(200, {
                     route: 'general',
                     answer: callResult.data.text || 'No response generated.',
+                    text: callResult.data.text || 'No response generated.',
                     citations: [],
                     grounded: false,
                     isGroundingVerified: false,
@@ -439,6 +474,7 @@ STRICT INTEGRITY DIRECTIVES:
               sendJson(200, {
                 route: 'general',
                 answer: localResult.answer,
+                text: localResult.answer,
                 citations: [],
                 grounded: false,
                 isGroundingVerified: false,
