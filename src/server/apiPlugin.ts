@@ -1,7 +1,13 @@
 import type { Plugin, ViteDevServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
-import type { SourceCitation, StudyMaterial, TutorPreferences } from '../types/index.ts';
-import { buildEffectiveTutorInstructions, getTutorPreferencesSummary } from '../lib/tutorInstructions.ts';
+import type { StudyMaterial, TutorPreferences, TutorInteractionMode } from '../types/index.ts';
+import { buildEffectiveTutorInstructions } from '../lib/tutorInstructions.ts';
+import {
+  retrieveRelevantChunks,
+  buildCitation,
+  generateLocalGroundedAnswer,
+} from '../lib/documentRetrieval.ts';
+import { generateContentWithRetry } from './geminiResilience.ts';
 
 /**
  * Vite Dev Server plugin providing server-side API endpoints for StudyMate AI.
@@ -19,20 +25,20 @@ export function studyMateApiPlugin(): Plugin {
           const hasApiKey = Boolean(
             process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
           );
-          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.end(
             JSON.stringify({
               status: 'ok',
               apiKeyConfigured: hasApiKey,
               model: 'gemini-3.8-flash',
-              groundingEngine: 'Local-Semantic-Index + Multimodal Extractor',
+              groundingEngine: 'Local-Semantic-Index + Relevance Gate',
               timestamp: new Date().toISOString(),
             })
           );
           return;
         }
 
-        // 2. POST /api/tutor - Source-grounded tutoring answer
+        // 2. POST /api/tutor - Intelligent Tutor Routing, Relevance Validation & Resilient Answering
         if (url === '/api/tutor' && req.method === 'POST') {
           let body = '';
           req.on('data', (chunk) => {
@@ -40,30 +46,80 @@ export function studyMateApiPlugin(): Plugin {
           });
 
           req.on('end', async () => {
+            const sendJson = (statusCode: number, payload: any) => {
+              res.statusCode = statusCode;
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.end(JSON.stringify(payload));
+            };
+
             try {
-              const data = JSON.parse(body || '{}');
+              let data: any = {};
+              try {
+                data = JSON.parse(body || '{}');
+              } catch {
+                sendJson(400, { error: 'Invalid JSON request payload', route: 'error' });
+                return;
+              }
+
               const {
                 question,
                 materialId,
                 materials = [],
                 preferences,
                 studentName,
+                mode = 'smart_tutor', // 'smart_tutor' | 'grounded_study'
+                simulateError, // For controlled resilience testing
               } = data;
 
-              if (!question || typeof question !== 'string') {
-                res.statusCode = 400;
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ error: 'Question is required' }));
+              if (!question || typeof question !== 'string' || !question.trim()) {
+                sendJson(400, { error: 'Question is required', route: 'error' });
                 return;
               }
 
+              // Controlled error simulations for testing requirements
+              if (simulateError === '503' || question === '__SIMULATE_503__') {
+                sendJson(503, {
+                  error: 'The AI service is temporarily unavailable.',
+                  route: 'error',
+                  isBusyError: true,
+                  canRetry: true,
+                  simulated: true,
+                });
+                return;
+              }
+
+              if (simulateError === 'timeout' || question === '__SIMULATE_TIMEOUT__') {
+                sendJson(504, {
+                  error: 'StudyMate is taking longer than expected. Please try again.',
+                  route: 'error',
+                  isTimeout: true,
+                  canRetry: true,
+                  simulated: true,
+                });
+                return;
+              }
+
+              if (simulateError === '429' || question === '__SIMULATE_429__') {
+                sendJson(429, {
+                  error: 'AI usage limit reached. Please try again when service is available.',
+                  route: 'error',
+                  isRateLimit: true,
+                  canRetry: true,
+                  simulated: true,
+                });
+                return;
+              }
+
+              if (simulateError === 'html' || question === '__SIMULATE_HTML__') {
+                res.statusCode = 504;
+                res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                res.end('<!doctype html><html><head><title>504 Gateway Timeout</title></head><body><h1>504 Gateway Timeout</h1></body></html>');
+                return;
+              }
+
+              const tutorMode: TutorInteractionMode =
+                mode === 'grounded_study' ? 'grounded_study' : 'smart_tutor';
               const userMaterials: StudyMaterial[] = Array.isArray(materials) ? materials : [];
-
-              // Collect relevant source chunks from provided materials
-              const relevantChunks = userMaterials.flatMap((m) =>
-                (!materialId || m.id === materialId ? m.chunks || [] : [])
-              );
-
               const hasApiKey = Boolean(
                 process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
               );
@@ -75,180 +131,327 @@ export function studyMateApiPlugin(): Plugin {
                   })
                 : 'You are StudyMate AI, a personalized, source-grounded academic tutor.';
 
-              // If no materials are uploaded yet
-              if (relevantChunks.length === 0) {
-                if (hasApiKey) {
-                  try {
-                    const ai = new GoogleGenAI();
-                    const prompt = `${effectiveSystemPrompt}\n\nIMPORTANT STATUS: The student has not yet uploaded specific course documents to their study space. Answer their general inquiry clearly adhering to the pedagogical instructions above, and remind them that uploading course PDFs or slides will enable page-level citations.`;
-
-                    const response = await ai.models.generateContent({
-                      model: 'gemini-3.8-flash',
-                      contents: question,
-                      config: {
-                        systemInstruction: prompt,
-                      },
-                    });
-
-                    res.setHeader('Content-Type', 'application/json');
-                    res.end(
-                      JSON.stringify({
-                        answer: response.text || 'No response generated.',
-                        citations: [],
-                        isGroundingVerified: false,
-                        model: 'gemini-3.8-flash (Preferences Active)',
-                        apiKeyConfigured: true,
-                        noMaterialsWarning: true,
-                      })
-                    );
-                    return;
-                  } catch (err: any) {
-                    console.error('Gemini error with empty materials:', err);
-                  }
-                }
-
-                // Deterministic response when no materials exist
-                let fallbackAnswer = `You haven't uploaded any course materials yet.\n\nTo enable source-grounded answers with verifiable page or slide citations, go to **Study Materials** and upload your course syllabus, lecture slides (PDF/PPTX), or textbook chapters.\n\nOnce uploaded, I will analyze your specific materials and cite exact page passages for every answer!`;
-
-                if (preferences?.enableKnowledgeChecks) {
-                  fallbackAnswer += `\n\n---\n**Comprehension Check**: What subject or course are you planning to study with StudyMate AI today?`;
-                }
-
-                res.setHeader('Content-Type', 'application/json');
-                res.end(
-                  JSON.stringify({
-                    answer: fallbackAnswer,
-                    citations: [],
-                    isGroundingVerified: false,
-                    model: 'StudyMate Tutor',
-                    apiKeyConfigured: false,
-                    noMaterialsWarning: true,
-                  })
-                );
-                return;
-              }
-
-              // Perform semantic keyword scoring on chunks
-              const questionTerms = question
-                .toLowerCase()
-                .replace(/[^a-z0-9 ]/g, ' ')
-                .split(/\s+/)
-                .filter(Boolean);
-
-              const scoredChunks = relevantChunks.map((chunk) => {
-                const chunkText = (chunk.extractedText + ' ' + chunk.sectionHeading).toLowerCase();
-                let matches = 0;
-                for (const term of questionTerms) {
-                  if (term.length > 2 && chunkText.includes(term)) {
-                    matches++;
-                  }
-                }
-                const score = questionTerms.length > 0 ? matches / questionTerms.length : 0;
-                return { chunk, score };
+              // =========================================================================
+              // RELEVANCE & INTENT ROUTER
+              // Evaluates whether uploaded materials genuinely contain information
+              // relevant enough to answer the user's specific question.
+              // =========================================================================
+              const retrieval = retrieveRelevantChunks(userMaterials, question, {
+                materialIdFilter: materialId || undefined,
+                maxResults: 3,
+                sufficiencyThreshold: 0.45,
               });
 
-              // Sort by score and pick top relevant chunks
-              scoredChunks.sort((a, b) => b.score - a.score);
-              const topMatches = scoredChunks.filter((item) => item.score > 0.05).slice(0, 3);
-              const fallbackChunk = scoredChunks[0];
-              const selectedMatches =
-                topMatches.length > 0 ? topMatches : fallbackChunk ? [fallbackChunk] : [];
+              const isMaterialsRelevant = retrieval.isSufficient && retrieval.matches.length > 0;
 
-              const citations: SourceCitation[] = selectedMatches.map(({ chunk, score }) => ({
-                id: `cite-${chunk.id}-${Date.now()}`,
-                chunkId: chunk.id,
-                materialId: chunk.materialId,
-                materialTitle: chunk.materialTitle,
-                pageOrSlideNumber: chunk.pageOrSlideNumber,
-                pageNumber: chunk.pageNumber,
-                slideNumber: chunk.slideNumber,
-                anchorLabel: chunk.anchorLabel,
-                sectionHeading: chunk.sectionHeading,
-                excerpt: chunk.extractedText.slice(0, 200) + '...',
-                relevanceScore: Math.min(0.99, Math.max(0.75, score * 1.5)),
-              }));
+              // =========================================================================
+              // ROUTE 1: GROUNDED STUDY MODE (STRICT SCOPE)
+              // =========================================================================
+              if (tutorMode === 'grounded_study') {
+                if (!isMaterialsRelevant) {
+                  const refusalMessage =
+                    "I couldn't find enough information in your uploaded study materials to answer that question. You can upload relevant materials or switch to Smart Tutor for general explanations.";
 
-              if (hasApiKey) {
-                try {
-                  const ai = new GoogleGenAI();
-                  const excerptsBlock = selectedMatches
-                    .map(
-                      (m) =>
-                        `[Source: ${m.chunk.materialTitle} | Location: ${m.chunk.anchorLabel || (m.chunk.pageNumber ? 'Page ' + m.chunk.pageNumber : m.chunk.slideNumber ? 'Slide ' + m.chunk.slideNumber : m.chunk.sectionHeading)} | Heading: ${m.chunk.sectionHeading}]\n${m.chunk.extractedText}`
-                    )
-                    .join('\n\n');
+                  sendJson(200, {
+                    route: 'insufficient',
+                    answer: refusalMessage,
+                    citations: [],
+                    grounded: false,
+                    isGroundingVerified: false,
+                    sourceLabel: undefined,
+                    isUnsupportedInMaterials: true,
+                    model: 'StudyMate Grounded Scope',
+                    apiKeyConfigured: hasApiKey,
+                  });
+                  return;
+                }
 
-                  const fullSystemPrompt = `${effectiveSystemPrompt}
+                const citations = retrieval.matches.map((m) =>
+                  buildCitation(m.chunk, m.score, m.matchedKeywords)
+                );
 
-GROUNDING COURSE EXCERPTS:
-${excerptsBlock}`;
+                if (hasApiKey) {
+                  const excerptsBlock = retrieval.matches
+                    .map((m, idx) => {
+                      const c = m.chunk;
+                      const anchor =
+                        c.anchorLabel ||
+                        (c.pageNumber
+                          ? `Page ${c.pageNumber}`
+                          : c.slideNumber
+                          ? `Slide ${c.slideNumber}`
+                          : c.sectionHeading);
+                      return `[PASSAGE ${idx + 1} | Source: "${c.materialTitle}" (${c.filename || c.materialTitle}) | Location: ${anchor} | Section: ${c.sectionHeading}]\n${c.extractedText}`;
+                    })
+                    .join('\n\n---\n\n');
 
-                  const response = await ai.models.generateContent({
+                  const groundingInstruction = `${effectiveSystemPrompt}
+
+### VERIFIED GROUNDING SOURCE PASSAGES (REFERENCE DATA):
+The following excerpts are authentic passages retrieved from the student's uploaded course documents:
+
+${excerptsBlock}
+
+### CRITICAL GROUNDING AND INTEGRITY DIRECTIVES:
+1. Verify that the excerpts above genuinely address the student's question: "${question}".
+2. If the excerpts do not contain enough information to answer the question, output ONLY: ROUTE_UNSUPPORTED
+3. If they are relevant, ground your answer strictly in the verified facts and definitions in the source passages above.
+4. Explicitly reference the document title and source anchor (e.g. Page X, Slide Y, or Section).
+5. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).`;
+
+                  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                  const callResult = await generateContentWithRetry(ai, {
                     model: 'gemini-3.8-flash',
                     contents: question,
                     config: {
-                      systemInstruction: fullSystemPrompt,
+                      systemInstruction: groundingInstruction,
                     },
+                    maxRetries: 2,
+                    baseDelayMs: 1000,
                   });
 
-                  res.setHeader('Content-Type', 'application/json');
-                  res.end(
-                    JSON.stringify({
-                      answer: response.text || 'No response generated.',
+                  if (callResult.success && callResult.data) {
+                    const text = callResult.data.text?.trim() || '';
+
+                    if (text === 'ROUTE_UNSUPPORTED' || text.startsWith('ROUTE_UNSUPPORTED')) {
+                      sendJson(200, {
+                        route: 'insufficient',
+                        answer: "I couldn't find enough information in your uploaded study materials to answer that question.",
+                        citations: [],
+                        grounded: false,
+                        isGroundingVerified: false,
+                        sourceLabel: undefined,
+                        model: 'StudyMate Grounded Scope',
+                        apiKeyConfigured: true,
+                      });
+                      return;
+                    }
+
+                    sendJson(200, {
+                      route: 'grounded',
+                      answer: text || 'No response generated.',
                       citations,
+                      grounded: true,
                       isGroundingVerified: true,
-                      model: 'gemini-3.8-flash (Preferences Active)',
+                      sourceLabel: 'Based on Your Study Materials',
+                      model: 'gemini-3.8-flash (Source-Grounded)',
                       apiKeyConfigured: true,
-                    })
-                  );
+                    });
+                    return;
+                  }
+
+                  // If Gemini request failed, return clean error response
+                  sendJson(callResult.statusCode || 503, {
+                    error: callResult.userFacingMessage || 'The AI service is temporarily unavailable.',
+                    route: 'error',
+                    isBusyError: callResult.isBusyError,
+                    isTimeout: callResult.isTimeout,
+                    isRateLimit: callResult.isRateLimit,
+                    canRetry: true,
+                  });
                   return;
-                } catch (geminiError: any) {
-                  console.error('Gemini API Error in /api/tutor:', geminiError);
-                }
-              }
-
-              // Local grounded response synthesis respecting preferences
-              const topChunk = selectedMatches[0]?.chunk;
-              let answer = '';
-
-              if (topChunk) {
-                const docRef = `[${topChunk.materialTitle}, Page/Slide ${topChunk.pageOrSlideNumber}]`;
-                const approach = preferences?.teachingApproach || 'socratic';
-                const isConcise = preferences?.explanationLength === 'concise';
-
-                if (approach === 'socratic') {
-                  answer = isConcise
-                    ? `Let's examine **${topChunk.materialTitle}** (${docRef}):\n\n> "${topChunk.extractedText}"\n\n**Inquiry:** What primary condition must hold before this transition takes place?`
-                    : `Let's explore this concept systematically, grounded in **${topChunk.materialTitle}** (${docRef}).\n\nIn section **${topChunk.sectionHeading}**, your uploaded text establishes:\n> "${topChunk.extractedText}"\n\n### Guided Inquiry:\n1. How does this mechanism satisfy the core invariant described in your course?\n2. What failure mode would occur if this requirement were relaxed?`;
-                } else if (approach === 'step_by_step') {
-                  answer = `### Step-by-Step Breakdown — Grounded in ${docRef}\n\n1. **Core Principle:** Grounded in ${topChunk.sectionHeading}.\n2. **Mechanism:** "${topChunk.extractedText}"\n3. **Application:** System components execute this rule deterministically to maintain consistency.\n\n*Reference: ${docRef}*`;
-                } else {
-                  // Direct
-                  answer = `**Direct Answer** (Grounded in ${docRef}):\n\nAccording to section **${topChunk.sectionHeading}**:\n> "${topChunk.extractedText}"\n\nThis directly establishes the operational parameter for ${topChunk.sectionHeading}.`;
                 }
 
-                // If knowledge checks are enabled, append a check
-                if (preferences?.enableKnowledgeChecks) {
-                  answer += `\n\n---\n**Comprehension Check**: In your own words, why is this condition required on Page/Slide ${topChunk.pageOrSlideNumber}?`;
-                }
-              } else {
-                answer = `I examined your uploaded materials, but couldn't locate a matching passage for "${question}".\n\nTry rephrasing your inquiry or searching for terms present in your uploaded documents.`;
-              }
+                // Local synthesis fallback with genuine citations
+                const localResult = generateLocalGroundedAnswer(
+                  question,
+                  retrieval.matches,
+                  preferences as TutorPreferences,
+                  { interactionMode: 'grounded_study' }
+                );
 
-              res.setHeader('Content-Type', 'application/json');
-              res.end(
-                JSON.stringify({
-                  answer,
+                sendJson(200, {
+                  route: 'grounded',
+                  answer: localResult.answer,
                   citations,
-                  isGroundingVerified: citations.length > 0,
-                  model: 'Grounded Engine (Demo Mode)',
+                  grounded: true,
+                  isGroundingVerified: true,
+                  sourceLabel: 'Based on Your Study Materials',
+                  model: 'StudyMate Grounded Engine',
                   apiKeyConfigured: false,
-                })
+                });
+                return;
+              }
+
+              // =========================================================================
+              // ROUTE 2: SMART TUTOR MODE (HYBRID RELEVANCE-AWARE)
+              // =========================================================================
+
+              // Case 2A: Uploaded materials genuinely contain information relevant to the question
+              if (isMaterialsRelevant) {
+                const citations = retrieval.matches.map((m) =>
+                  buildCitation(m.chunk, m.score, m.matchedKeywords)
+                );
+
+                if (hasApiKey) {
+                  const excerptsBlock = retrieval.matches
+                    .map((m, idx) => {
+                      const c = m.chunk;
+                      const anchor =
+                        c.anchorLabel ||
+                        (c.pageNumber
+                          ? `Page ${c.pageNumber}`
+                          : c.slideNumber
+                          ? `Slide ${c.slideNumber}`
+                          : c.sectionHeading);
+                      return `[PASSAGE ${idx + 1} | Source: "${c.materialTitle}" (${c.filename || c.materialTitle}) | Location: ${anchor} | Section: ${c.sectionHeading}]\n${c.extractedText}`;
+                    })
+                    .join('\n\n---\n\n');
+
+                  const groundingInstruction = `${effectiveSystemPrompt}
+
+### VERIFIED GROUNDING SOURCE PASSAGES (REFERENCE DATA):
+The following excerpts are authentic passages retrieved from the student's uploaded course documents:
+
+${excerptsBlock}
+
+### CRITICAL GROUNDING AND INTEGRITY DIRECTIVES:
+1. Verify that the excerpts above genuinely address the student's question: "${question}".
+2. If the excerpts do NOT contain substantive information relevant to "${question}" (for example, if the question is from a different academic subject), output ONLY: ROUTE_UNSUPPORTED
+3. If they are relevant, ground your answer strictly in the verified facts and definitions in the source passages above.
+4. Explicitly reference the document title and source anchor (e.g. Page X, Slide Y, or Section).
+5. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).`;
+
+                  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                  const callResult = await generateContentWithRetry(ai, {
+                    model: 'gemini-3.8-flash',
+                    contents: question,
+                    config: {
+                      systemInstruction: groundingInstruction,
+                    },
+                    maxRetries: 2,
+                    baseDelayMs: 1000,
+                  });
+
+                  if (callResult.success && callResult.data) {
+                    const text = callResult.data.text?.trim() || '';
+
+                    if (text !== 'ROUTE_UNSUPPORTED' && !text.startsWith('ROUTE_UNSUPPORTED')) {
+                      sendJson(200, {
+                        route: 'grounded',
+                        answer: text || 'No response generated.',
+                        citations,
+                        grounded: true,
+                        isGroundingVerified: true,
+                        sourceLabel: 'Based on Your Study Materials',
+                        model: 'gemini-3.8-flash (Source-Grounded)',
+                        apiKeyConfigured: true,
+                      });
+                      return;
+                    }
+                    // Model identified passages were not relevant -> fall through to general knowledge
+                  } else if (!callResult.success) {
+                    sendJson(callResult.statusCode || 503, {
+                      error: callResult.userFacingMessage || 'The AI service is temporarily unavailable.',
+                      route: 'error',
+                      isBusyError: callResult.isBusyError,
+                      isTimeout: callResult.isTimeout,
+                      isRateLimit: callResult.isRateLimit,
+                      canRetry: true,
+                    });
+                    return;
+                  }
+                } else {
+                  // No API key: Local synthesis with genuine citations
+                  const localResult = generateLocalGroundedAnswer(
+                    question,
+                    retrieval.matches,
+                    preferences as TutorPreferences,
+                    { interactionMode: 'smart_tutor' }
+                  );
+
+                  sendJson(200, {
+                    route: 'grounded',
+                    answer: localResult.answer,
+                    citations,
+                    grounded: true,
+                    isGroundingVerified: true,
+                    sourceLabel: 'Based on Your Study Materials',
+                    model: 'StudyMate Grounded Engine',
+                    apiKeyConfigured: false,
+                  });
+                  return;
+                }
+              }
+
+              // Case 2B: Uploaded materials do NOT contain sufficiently relevant information.
+              // Route to GENERAL KNOWLEDGE:
+              // Answer using general academic knowledge without mentioning unrelated uploaded files or tax concepts.
+              if (hasApiKey) {
+                const generalKnowledgePrompt = `${effectiveSystemPrompt}
+
+ROUTING INSTRUCTION (SMART TUTOR GENERAL KNOWLEDGE):
+The student's question ("${question}") is not addressed by their currently uploaded study materials.
+You must answer the student's question directly, helpfully, and accurately using general academic knowledge.
+
+STRICT INTEGRITY DIRECTIVES:
+1. Do NOT mention, reference, or cite any uploaded files or unrelated course topics (for example, if the user uploaded taxation notes, DO NOT mention taxation, business income, or customs).
+2. Answer purely the subject matter of the question using standard academic principles.
+3. Adhere to the student's pedagogical preferences (approach, difficulty, style, length, knowledge check).
+4. Do NOT fabricate citations or claim this came from course files.`;
+
+                const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                const callResult = await generateContentWithRetry(ai, {
+                  model: 'gemini-3.8-flash',
+                  contents: question,
+                  config: {
+                    systemInstruction: generalKnowledgePrompt,
+                  },
+                  maxRetries: 2,
+                  baseDelayMs: 1000,
+                });
+
+                if (callResult.success && callResult.data) {
+                  sendJson(200, {
+                    route: 'general',
+                    answer: callResult.data.text || 'No response generated.',
+                    citations: [],
+                    grounded: false,
+                    isGroundingVerified: false,
+                    sourceLabel: 'General Knowledge',
+                    model: 'gemini-3.8-flash (General Knowledge)',
+                    apiKeyConfigured: true,
+                  });
+                  return;
+                }
+
+                // If Gemini request failed
+                sendJson(callResult.statusCode || 503, {
+                  error: callResult.userFacingMessage || 'The AI service is temporarily unavailable.',
+                  route: 'error',
+                  isBusyError: callResult.isBusyError,
+                  isTimeout: callResult.isTimeout,
+                  isRateLimit: callResult.isRateLimit,
+                  canRetry: true,
+                });
+                return;
+              }
+
+              // Local fallback for Smart Tutor when no API key is available
+              const localResult = generateLocalGroundedAnswer(
+                question,
+                [],
+                preferences as TutorPreferences,
+                { interactionMode: 'smart_tutor' }
               );
+
+              sendJson(200, {
+                route: 'general',
+                answer: localResult.answer,
+                citations: [],
+                grounded: false,
+                isGroundingVerified: false,
+                sourceLabel: 'General Knowledge',
+                model: 'StudyMate Educational Engine',
+                apiKeyConfigured: false,
+              });
             } catch (err: any) {
-              res.statusCode = 500;
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ error: err.message || 'Internal server error' }));
+              console.error('Unhandled error in /api/tutor:', err);
+              sendJson(500, {
+                error: 'The AI service is temporarily unavailable.',
+                route: 'error',
+                canRetry: true,
+              });
             }
           });
           return;

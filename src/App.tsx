@@ -30,6 +30,8 @@ import {
   setStoredTutorPreferences,
   getStoredReviewRecords,
   setStoredReviewRecords,
+  getStoredTutorInteractionMode,
+  setStoredTutorInteractionMode,
 } from './lib/storage';
 
 import { calculateNextReview } from './lib/spacedRepetition';
@@ -41,6 +43,7 @@ import type {
   TutorMessage,
   SourceCitation,
   TutorMode,
+  TutorInteractionMode,
   StudentProfile,
   TutorPreferences,
   ReviewRecord,
@@ -93,6 +96,14 @@ export default function App() {
   const [questions, setQuestions] = useState(INITIAL_QUIZ_QUESTIONS);
   const [tutorMessages, setTutorMessages] = useState<TutorMessage[]>(INITIAL_TUTOR_MESSAGES);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
+  const [tutorInteractionMode, setTutorInteractionMode] = useState<TutorInteractionMode>(() =>
+    getStoredTutorInteractionMode()
+  );
+
+  const handleTutorModeChange = (mode: TutorInteractionMode) => {
+    setTutorInteractionMode(mode);
+    setStoredTutorInteractionMode(mode);
+  };
 
   // Inspector modal state
   const [inspectorModalOpen, setInspectorModalOpen] = useState(false);
@@ -184,8 +195,9 @@ export default function App() {
   };
 
   const handleOpenCitation = (citation: SourceCitation) => {
+    const targetMaterial = materials.find((m) => m.id === citation.materialId);
+    setInspectedMaterial(targetMaterial || null);
     setInspectedCitation(citation);
-    setInspectedMaterial(null);
     setInspectorModalOpen(true);
   };
 
@@ -225,17 +237,20 @@ export default function App() {
   const handleSendMessage = async (
     question: string,
     materialId?: string,
-    mode?: TutorMode
+    isRetry = false
   ) => {
-    const userMsg: TutorMessage = {
-      id: `msg-user-${Date.now()}`,
-      role: 'user',
-      text: question,
-      timestamp: new Date().toISOString(),
-      isGroundingVerified: false,
-    };
+    if (!isRetry) {
+      const userMsg: TutorMessage = {
+        id: `msg-user-${Date.now()}`,
+        role: 'user',
+        text: question,
+        timestamp: new Date().toISOString(),
+        isGroundingVerified: false,
+        interactionMode: tutorInteractionMode,
+      };
+      setTutorMessages((prev) => [...prev, userMsg]);
+    }
 
-    setTutorMessages((prev) => [...prev, userMsg]);
     setIsTutorLoading(true);
 
     try {
@@ -245,90 +260,121 @@ export default function App() {
         body: JSON.stringify({
           question,
           materialId,
-          mode,
+          mode: tutorInteractionMode,
           materials,
           preferences: tutorPreferences,
           studentName: student.name,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+      // Robust response parsing: verify Content-Type before calling .json()
+      const contentType = response.headers.get('content-type') || '';
+      let data: any = null;
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+      } else {
+        // Non-JSON response (e.g., HTML 502/504 gateway error from proxy/server)
+        const rawText = await response.text().catch(() => '');
+        console.warn('Received non-JSON response from /api/tutor:', response.status, rawText.slice(0, 80));
       }
 
-      const data = await response.json();
+      // Check for error status codes or structured error responses
+      if (!response.ok || data?.route === 'error' || data?.error) {
+        let errorText = 'The AI service is temporarily unavailable.';
+
+        if (response.status === 504 || response.status === 408 || data?.isTimeout) {
+          errorText = 'StudyMate is taking longer than expected. Please try again.';
+        } else if (response.status === 429 || data?.isRateLimit) {
+          errorText = 'AI usage limit reached. Please try again when service is available.';
+        } else if (response.status === 503 || data?.isBusyError) {
+          errorText = 'The AI service is temporarily unavailable.';
+        } else if (data?.error && typeof data.error === 'string') {
+          errorText = data.error;
+        } else {
+          errorText = 'StudyMate\'s AI service is temporarily unavailable. Please retry.';
+        }
+
+        const errorMsg: TutorMessage = {
+          id: `msg-tutor-err-${Date.now()}`,
+          role: 'assistant',
+          text: errorText,
+          timestamp: new Date().toISOString(),
+          isGroundingVerified: false,
+          errorState: true,
+          canRetry: true,
+          failedQuestion: question,
+          failedMaterialFilter: materialId,
+          interactionMode: tutorInteractionMode,
+          route: 'error',
+        };
+        setTutorMessages((prev) => [...prev, errorMsg]);
+        return;
+      }
+
+      // Successful response from /api/tutor
+      const route = data?.route;
+      const isGrounded = route === 'grounded' || (Boolean(data?.isGroundingVerified) && (data?.citations?.length || 0) > 0);
 
       const assistantMsg: TutorMessage = {
         id: `msg-tutor-${Date.now()}`,
         role: 'assistant',
-        text: data.answer,
+        text: data?.answer || "I couldn't generate a response for that question.",
         timestamp: new Date().toISOString(),
-        citations: data.citations || [],
-        isGroundingVerified: data.isGroundingVerified,
-        modelUsed: data.model,
-        isSimulated: !data.apiKeyConfigured,
+        citations: isGrounded ? (data?.citations || []) : [],
+        isGroundingVerified: isGrounded,
+        sourceLabel: isGrounded
+          ? 'Based on Your Study Materials'
+          : route === 'general' || data?.sourceLabel === 'General Knowledge' || data?.sourceLabel === 'General AI Knowledge'
+          ? 'General Knowledge'
+          : undefined,
+        interactionMode: tutorInteractionMode,
+        route: route || (isGrounded ? 'grounded' : 'general'),
+        modelUsed: data?.model,
+        isSimulated: !data?.apiKeyConfigured,
       };
 
       setTutorMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
       console.error('Tutor API fetch error:', err);
-      // Client-side fallback grounded response
-      const relevantMat = materials.find((m) => !materialId || m.id === materialId) || materials[0];
-      const chunk = relevantMat?.chunks?.[0];
 
-      let fallbackText = '';
-      if (chunk) {
-        const anchor = chunk.pageNumber
-          ? `Page ${chunk.pageNumber}`
-          : chunk.slideNumber
-          ? `Slide ${chunk.slideNumber}`
-          : chunk.anchorLabel || chunk.sectionHeading || 'Section';
+      // Graceful error state: NEVER disguise an API or network failure as an unrelated grounded answer!
+      const isTimeout =
+        String(err?.message || '').toLowerCase().includes('timeout') ||
+        String(err?.message || '').toLowerCase().includes('timed out');
 
-        const approach = tutorPreferences.teachingApproach;
-        if (approach === 'socratic') {
-          fallbackText = `Grounded in **${relevantMat.title}** (${anchor}):\n\n> "${chunk.extractedText}"\n\n**Inquiry:** How does this relate to the main problem in your course? What would change if this condition was absent?`;
-        } else if (approach === 'step_by_step') {
-          fallbackText = `### Step-by-Step Breakdown (${relevantMat.title}, ${anchor}):\n1. **Core Concept:** Grounded in ${chunk.sectionHeading}.\n2. **Passage Excerpt:** "${chunk.extractedText}"\n3. **Application:** Verifiable under standard system parameters.`;
-        } else {
-          fallbackText = `**Direct Answer** (${relevantMat.title}, ${anchor}):\n\n"${chunk.extractedText}"\n\n*Verified from your uploaded document.*`;
-        }
+      const userErrorMessage = isTimeout
+        ? 'StudyMate is taking longer than expected. Please try again.'
+        : 'StudyMate\'s AI service is temporarily unavailable. Please retry.';
 
-        if (tutorPreferences.enableKnowledgeChecks) {
-          fallbackText += `\n\n---\n**Comprehension Check:** Can you state one primary takeaway from this excerpt?`;
-        }
-      } else {
-        fallbackText = `You haven't uploaded course materials yet. Upload your lecture slides or notes in **Study Materials** to enable verified citations.`;
-        if (tutorPreferences.enableKnowledgeChecks) {
-          fallbackText += `\n\n---\n**Comprehension Check:** What course are you working on today?`;
-        }
-      }
-
-      const fallbackMsg: TutorMessage = {
-        id: `msg-tutor-fb-${Date.now()}`,
+      const failureMsg: TutorMessage = {
+        id: `msg-tutor-err-${Date.now()}`,
         role: 'assistant',
-        text: fallbackText,
+        text: userErrorMessage,
         timestamp: new Date().toISOString(),
-        citations: chunk
-          ? [
-              {
-                id: `cite-fb-${chunk.id}`,
-                chunkId: chunk.id,
-                materialId: chunk.materialId,
-                materialTitle: chunk.materialTitle,
-                pageOrSlideNumber: chunk.pageOrSlideNumber,
-                sectionHeading: chunk.sectionHeading,
-                excerpt: chunk.extractedText.slice(0, 160) + '...',
-                relevanceScore: 0.95,
-              },
-            ]
-          : [],
-        isGroundingVerified: !!chunk,
-        modelUsed: 'Local Grounded Engine (Demo Mode)',
-        isSimulated: true,
+        isGroundingVerified: false,
+        errorState: true,
+        canRetry: true,
+        failedQuestion: question,
+        failedMaterialFilter: materialId,
+        interactionMode: tutorInteractionMode,
+        route: 'error',
       };
-      setTutorMessages((prev) => [...prev, fallbackMsg]);
+      setTutorMessages((prev) => [...prev, failureMsg]);
     } finally {
       setIsTutorLoading(false);
+    }
+  };
+
+  const handleRetryMessage = async (failedMsg: TutorMessage) => {
+    // Remove the failed error message to avoid duplicate errors in the thread
+    setTutorMessages((prev) => prev.filter((m) => m.id !== failedMsg.id));
+    if (failedMsg.failedQuestion) {
+      await handleSendMessage(failedMsg.failedQuestion, failedMsg.failedMaterialFilter, true);
     }
   };
 
@@ -462,11 +508,14 @@ export default function App() {
             preferences={tutorPreferences}
             onSavePreferences={handleSaveTutorPreferences}
             onSendMessage={handleSendMessage}
+            onRetryMessage={handleRetryMessage}
             onOpenCitation={handleOpenCitation}
             onClearHistory={handleClearTutorHistory}
             isLoading={isTutorLoading}
             activeMaterialFilter={activeMaterialFilter}
             onMaterialFilterChange={setActiveMaterialFilter}
+            interactionMode={tutorInteractionMode}
+            onModeChange={handleTutorModeChange}
             initialQuestionPrompt={tutorInitialPrompt}
             onNavigateToMaterials={() => handleNavigate('materials')}
           />

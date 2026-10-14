@@ -93,6 +93,10 @@ export interface TutorPreferences {
 
 export type TutorMode = 'socratic' | 'deep_dive' | 'exam_summary';
 
+export type TutorInteractionMode = 'smart_tutor' | 'grounded_study';
+export type TutorRoute = 'grounded' | 'general' | 'insufficient' | 'error';
+export type TutorSourceLabel = 'Based on Your Study Materials' | 'General Knowledge' | 'General AI Knowledge';
+
 export interface TutorMessage {
   id: string;
   role: TutorRole;
@@ -100,9 +104,16 @@ export interface TutorMessage {
   timestamp: string;
   citations?: SourceCitation[];
   isGroundingVerified: boolean;
+  sourceLabel?: TutorSourceLabel;
+  interactionMode?: TutorInteractionMode;
+  route?: TutorRoute;
   modelUsed?: string;
   isSimulated?: boolean;
   topicRef?: string;
+  errorState?: boolean;
+  canRetry?: boolean;
+  failedQuestion?: string;
+  failedMaterialFilter?: string;
 }
 
 export type DifficultyLevel = 'foundational' | 'intermediate' | 'advanced';

@@ -10,13 +10,16 @@ import {
   AlertCircle,
   PlusCircle,
   Sliders,
+  Sparkles,
+  Copy,
+  Check,
 } from 'lucide-react';
 import type {
   StudyMaterial,
   TutorMessage,
-  TutorMode,
   SourceCitation,
   TutorPreferences,
+  TutorInteractionMode,
 } from '../../types';
 import { TutorPreferencesPanel } from './TutorPreferencesPanel';
 import { getTutorPreferencesSummary } from '../../lib/tutorInstructions';
@@ -26,12 +29,15 @@ interface TutorSectionProps {
   messages: TutorMessage[];
   preferences: TutorPreferences;
   onSavePreferences: (newPreferences: TutorPreferences) => void;
-  onSendMessage: (question: string, materialId?: string, mode?: TutorMode) => Promise<void>;
+  onSendMessage: (question: string, materialId?: string) => Promise<void>;
+  onRetryMessage?: (message: TutorMessage) => Promise<void>;
   onOpenCitation: (citation: SourceCitation) => void;
   onClearHistory: () => void;
   isLoading: boolean;
   activeMaterialFilter?: string;
   onMaterialFilterChange: (materialId: string | undefined) => void;
+  interactionMode: TutorInteractionMode;
+  onModeChange: (mode: TutorInteractionMode) => void;
   initialQuestionPrompt?: string;
   onNavigateToMaterials?: () => void;
 }
@@ -42,16 +48,20 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
   preferences,
   onSavePreferences,
   onSendMessage,
+  onRetryMessage,
   onOpenCitation,
   onClearHistory,
   isLoading,
   activeMaterialFilter,
   onMaterialFilterChange,
+  interactionMode,
+  onModeChange,
   initialQuestionPrompt,
   onNavigateToMaterials,
 }) => {
   const [inputText, setInputText] = useState(initialQuestionPrompt || '');
   const [preferencesPanelOpen, setPreferencesPanelOpen] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -87,7 +97,39 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
     textareaRef.current?.focus();
   };
 
-  const currentMaterial = materials.find((m) => m.id === activeMaterialFilter);
+  /**
+   * Copy Response Button
+   * Copies only the assistant answer text to clipboard with visual feedback
+   */
+  const handleCopyResponse = async (msg: TutorMessage) => {
+    const textToCopy = msg.text;
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        // Fallback for iframe or restricted clipboard permissions
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '-9999px';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+
+      setCopiedMsgId(msg.id);
+      setTimeout(() => {
+        setCopiedMsgId(null);
+      }, 2000);
+    } catch (err) {
+      console.warn('Clipboard write failed:', err);
+    }
+  };
 
   // Generate dynamic suggestions based on real uploaded materials, or study prompts if empty
   const dynamicSuggestions =
@@ -141,7 +183,7 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
               <h1 className="text-sm font-bold text-slate-100">StudyMate AI Tutor</h1>
               <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3" />
-                {materials.length > 0 ? 'Source-Grounded' : 'Study Strategy'}
+                {interactionMode === 'smart_tutor' ? 'Smart Router' : 'Strict Grounded'}
               </span>
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
@@ -156,8 +198,38 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
           </div>
         </div>
 
-        {/* Controls: Material Selector & Preferences Panel Toggle */}
+        {/* Controls: Mode Selector, Material Selector & Preferences Panel Toggle */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Part 1: Compact Tutor Mode Selector */}
+          <div className="flex items-center bg-[#0B0F19] p-0.5 rounded-lg border border-slate-800 text-xs">
+            <button
+              type="button"
+              onClick={() => onModeChange('smart_tutor')}
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                interactionMode === 'smart_tutor'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Smart Tutor: Intelligently answers from uploaded materials when relevant, or provides general AI knowledge if unrelated."
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Smart Tutor</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onModeChange('grounded_study')}
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                interactionMode === 'grounded_study'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Grounded Study: Answers strictly from uploaded materials only. Rejects out-of-scope inquiries."
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Grounded Study</span>
+            </button>
+          </div>
+
           {/* Material Constraint Filter (if materials exist) */}
           {materials.length > 0 && (
             <select
@@ -168,7 +240,7 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
               <option value="">All Uploaded Materials ({materials.length})</option>
               {materials.map((m) => (
                 <option key={m.id} value={m.id}>
-                  [{m.courseCode}] {m.title.slice(0, 28)}...
+                  [{m.courseCode}] {m.title.slice(0, 26)}...
                 </option>
               ))}
             </select>
@@ -208,7 +280,7 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-indigo-400 shrink-0" />
             <span>
-              No course documents uploaded yet. Upload slides or PDFs to enable exact page citations.
+              No course documents uploaded yet. In Smart Tutor mode, answers use general educational knowledge.
             </span>
           </div>
           {onNavigateToMaterials && (
@@ -223,7 +295,7 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
         </div>
       )}
 
-      {/* Main Workspace (Flex row on desktop with collapsible right preferences panel) */}
+      {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden rounded-xl border border-slate-800/80 bg-[#0B0F19] relative">
         {/* Main Conversation Column */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -263,6 +335,22 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
                         minute: '2-digit',
                       })}
                     </span>
+
+                    {/* Source label badge for assistant responses */}
+                    {!isUser && !msg.errorState && msg.sourceLabel === 'Based on Your Study Materials' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800/50 flex items-center gap-1">
+                        <BookOpen className="w-3 h-3 text-emerald-400" />
+                        Based on Your Study Materials
+                      </span>
+                    )}
+
+                    {!isUser && !msg.errorState && (msg.sourceLabel === 'General Knowledge' || msg.sourceLabel === 'General AI Knowledge') && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-950/80 text-sky-300 border border-sky-800/50 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-sky-400" />
+                        General Knowledge
+                      </span>
+                    )}
+
                     {!isUser && msg.modelUsed && (
                       <>
                         <span aria-hidden="true">·</span>
@@ -278,50 +366,123 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
                     className={`max-w-3xl rounded-xl p-4 text-xs sm:text-sm leading-relaxed ${
                       isUser
                         ? 'bg-indigo-600 text-white shadow-sm'
+                        : msg.errorState
+                        ? 'bg-amber-950/30 border border-amber-800/60 text-amber-200 shadow-sm'
                         : 'bg-[#0F172A] border border-slate-800 text-slate-200 shadow-sm'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap font-sans space-y-2">
-                      {msg.text}
-                    </div>
-
-                    {/* Grounded Source Citations Panel (if any) */}
-                    {msg.citations && msg.citations.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
-                        <div className="flex items-center justify-between text-xs text-indigo-400 font-semibold">
-                          <span className="flex items-center gap-1.5">
-                            <BookOpen className="w-3.5 h-3.5" />
-                            Grounded Source Citations ({msg.citations.length})
-                          </span>
-                          <span className="text-[11px] text-slate-400 font-normal">
-                            Click citation to inspect source excerpt
-                          </span>
+                    {/* Error / Temporary Busy State with Retry Action */}
+                    {msg.errorState ? (
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-2.5">
+                          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div className="text-xs sm:text-sm text-amber-200 font-medium">
+                            {msg.text}
+                          </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {msg.citations.map((cite) => (
+                        {msg.canRetry && onRetryMessage && (
+                          <div className="pt-2 border-t border-amber-900/40 flex items-center gap-2">
                             <button
-                              key={cite.id}
                               type="button"
-                              onClick={() => onOpenCitation(cite)}
-                              className="text-left p-2.5 rounded-lg bg-[#0B0F19] hover:bg-slate-900 border border-slate-800 hover:border-indigo-600/50 transition-all group"
+                              onClick={() => onRetryMessage(msg)}
+                              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors flex items-center gap-1.5 shadow-sm"
                             >
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="font-semibold text-slate-200 group-hover:text-indigo-300 truncate">
-                                  {cite.materialTitle}
-                                </span>
-                                <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-indigo-400 shrink-0 ml-1" />
-                              </div>
-                              <div className="text-[11px] text-indigo-400 font-mono mt-0.5">
-                                Page / Slide {cite.pageOrSlideNumber} · {cite.sectionHeading}
-                              </div>
-                              <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 italic">
-                                "{cite.excerpt}"
-                              </p>
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Retry Question</span>
                             </button>
-                          ))}
-                        </div>
+                            {msg.failedQuestion && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInputText(msg.failedQuestion || '');
+                                  textareaRef.current?.focus();
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                              >
+                                Edit Question
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
+                    ) : (
+                      <>
+                        <div className="whitespace-pre-wrap font-sans space-y-2">
+                          {msg.text}
+                        </div>
+
+                        {/* Grounded Source Citations Panel (if any) */}
+                        {msg.citations && msg.citations.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
+                            <div className="flex items-center justify-between text-xs text-indigo-400 font-semibold">
+                              <span className="flex items-center gap-1.5">
+                                <BookOpen className="w-3.5 h-3.5" />
+                                Grounded Source Citations ({msg.citations.length})
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-normal">
+                                Click citation to inspect source excerpt
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {msg.citations.map((cite) => (
+                                <button
+                                  key={cite.id}
+                                  type="button"
+                                  onClick={() => onOpenCitation(cite)}
+                                  className="text-left p-2.5 rounded-lg bg-[#0B0F19] hover:bg-slate-900 border border-slate-800 hover:border-indigo-600/50 transition-all group"
+                                >
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-semibold text-slate-200 group-hover:text-indigo-300 truncate">
+                                      {cite.materialTitle}
+                                    </span>
+                                    <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-indigo-400 shrink-0 ml-1" />
+                                  </div>
+                                  <div className="text-[11px] text-indigo-400 font-mono mt-0.5 truncate">
+                                    {cite.anchorLabel ||
+                                      (cite.pageNumber
+                                        ? `Page ${cite.pageNumber}`
+                                        : cite.slideNumber
+                                        ? `Slide ${cite.slideNumber}`
+                                        : cite.pageOrSlideNumber
+                                        ? `Page / Slide ${cite.pageOrSlideNumber}`
+                                        : 'Passage')}{' '}
+                                    · {cite.sectionHeading}
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 italic">
+                                    "{cite.excerpt}"
+                                  </p>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Part 4: Copy Response Button Footer */}
+                        {!isUser && (
+                          <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyResponse(msg)}
+                              className="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-indigo-300 px-2.5 py-1 rounded-md bg-[#0B0F19] hover:bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
+                              title="Copy response text and citations to clipboard"
+                            >
+                              {copiedMsgId === msg.id ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span className="text-emerald-400 font-medium">Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>Copy Response</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -333,91 +494,63 @@ export const TutorSection: React.FC<TutorSectionProps> = ({
                 <div className="text-[11px] text-slate-400 px-1">StudyMate AI</div>
                 <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 flex items-center gap-3 text-xs text-slate-400">
                   <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
-                  <span>Processing inquiry and applying your personalized preferences...</span>
+                  <span>
+                    {interactionMode === 'smart_tutor'
+                      ? 'Analyzing query and evaluating relevance across study materials...'
+                      : 'Searching course materials for verified citations...'}
+                  </span>
                 </div>
               </div>
             )}
-
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Question Input Bar */}
-          <form onSubmit={handleSubmit} className="p-3 border-t border-slate-800/80 bg-[#0B0F19] shrink-0 space-y-2">
-            <div className="relative bg-[#0F172A] border border-slate-800 rounded-xl focus-within:border-indigo-500 transition-colors p-2 flex items-end gap-2">
+          {/* Message Input Box */}
+          <div className="p-3 bg-[#0F172A] border-t border-slate-800">
+            <form onSubmit={handleSubmit} className="relative flex items-end gap-2">
               <textarea
                 ref={textareaRef}
-                rows={2}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={
-                  currentMaterial
-                    ? `Ask anything grounded in ${currentMaterial.title}... (Shift+Enter for newline)`
-                    : materials.length > 0
-                    ? `Ask a question grounded in your course materials... (Shift+Enter for newline)`
-                    : `Ask a question or upload course documents to enable page citations...`
+                  interactionMode === 'smart_tutor'
+                    ? 'Ask any academic question (Smart Tutor routes to materials or general knowledge)...'
+                    : 'Ask a question strictly grounded in your uploaded course materials...'
                 }
-                className="flex-1 bg-transparent border-0 resize-none text-xs sm:text-sm text-slate-100 placeholder-slate-400 focus:outline-none p-1.5"
+                rows={2}
+                disabled={isLoading}
+                className="w-full bg-[#0B0F19] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none disabled:opacity-50"
               />
-
               <button
                 type="submit"
-                disabled={!inputText.trim() || isLoading}
-                className="p-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white transition-colors shrink-0 focus-visible:ring-2 focus-visible:ring-indigo-400"
-                aria-label="Send inquiry"
+                disabled={isLoading || !inputText.trim()}
+                className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white disabled:text-slate-500 rounded-xl transition-colors shrink-0 shadow-sm focus-visible:ring-2 focus-visible:ring-indigo-500"
+                title="Send inquiry"
               >
                 <Send className="w-4 h-4" />
               </button>
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-              <span className="flex items-center gap-1.5 truncate">
-                <ShieldCheck className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                <span className="truncate">
-                  {preferences.customInstructions
-                    ? 'Preferences & custom instructions active · Non-negotiable grounding preserved'
-                    : 'Preferences active · Non-negotiable grounding preserved'}
-                </span>
+            </form>
+            <div className="flex items-center justify-between mt-2 px-1 text-[11px] text-slate-500">
+              <span>
+                {interactionMode === 'smart_tutor'
+                  ? 'Smart Mode: Verified citations when relevant; general AI explanations when out-of-scope.'
+                  : 'Grounded Mode: Answers exclusively from uploaded documents; strictly refuses out-of-scope.'}
               </span>
-              <span className="font-mono shrink-0 pl-2">Press Enter</span>
+              <span className="font-mono hidden sm:inline">Press Enter to send, Shift+Enter for newline</span>
             </div>
-          </form>
+          </div>
         </div>
 
-        {/* Desktop Collapsible Preferences Panel */}
+        {/* Collapsible Tutor Preferences Panel */}
         {preferencesPanelOpen && (
-          <div className="hidden md:block shrink-0 animate-in slide-in-from-right duration-200">
-            <TutorPreferencesPanel
-              preferences={preferences}
-              onSavePreferences={onSavePreferences}
-              onClose={() => setPreferencesPanelOpen(false)}
-            />
-          </div>
+          <TutorPreferencesPanel
+            preferences={preferences}
+            onSavePreferences={onSavePreferences}
+            onClose={() => setPreferencesPanelOpen(false)}
+          />
         )}
       </div>
-
-      {/* Mobile Drawer (Accessible bottom drawer for mobile screens) */}
-      {preferencesPanelOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Tutor Preferences Drawer"
-          className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col justify-end"
-          onClick={() => setPreferencesPanelOpen(false)}
-        >
-          <div
-            className="bg-[#0F172A] rounded-t-2xl max-h-[85vh] flex flex-col border-t border-slate-800 shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <TutorPreferencesPanel
-              preferences={preferences}
-              onSavePreferences={onSavePreferences}
-              onClose={() => setPreferencesPanelOpen(false)}
-              isMobileDrawer={true}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 };

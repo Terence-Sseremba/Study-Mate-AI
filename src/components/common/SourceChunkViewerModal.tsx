@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, BookOpen, FileText, CheckCircle2, Copy, Check } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { X, BookOpen, FileText, CheckCircle2, Copy, Check, ShieldCheck } from 'lucide-react';
 import type { StudyMaterial, SourceChunk, SourceCitation } from '../../types';
 
 interface SourceChunkViewerModalProps {
@@ -15,18 +15,35 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
   material,
   selectedChunk,
 }) => {
-  const [copied, setCopied] = React.useState(false);
+  const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const highlightedRef = useRef<HTMLDivElement>(null);
+
+  // When opening a specific citation or chunk, smoothly scroll to it in the document view
+  useEffect(() => {
+    if (isOpen && highlightedRef.current) {
+      const timer = setTimeout(() => {
+        highlightedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, selectedChunk, material]);
 
   if (!isOpen) return null;
 
-  const handleCopy = (text: string) => {
+  const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   // Determine what chunks to display
-  const chunksToDisplay = material ? material.chunks : selectedChunk ? [selectedChunk] : [];
+  const chunksToDisplay: (SourceChunk | SourceCitation)[] =
+    material && material.chunks && material.chunks.length > 0
+      ? material.chunks
+      : selectedChunk
+      ? [selectedChunk]
+      : [];
+
   const title = material
     ? material.title
     : selectedChunk
@@ -34,6 +51,19 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
       ? selectedChunk.materialTitle
       : 'Source Reference Chunk'
     : 'Course Document Chunks';
+
+  // Target ID of the citation or chunk being inspected
+  const targetChunkId =
+    selectedChunk && 'chunkId' in selectedChunk
+      ? selectedChunk.chunkId
+      : selectedChunk && 'id' in selectedChunk
+      ? selectedChunk.id
+      : null;
+
+  const citationAnchor =
+    selectedChunk && 'anchorLabel' in selectedChunk
+      ? selectedChunk.anchorLabel
+      : null;
 
   return (
     <div
@@ -49,40 +79,45 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#131B2E]">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-950/60 border border-indigo-800/40 rounded-lg text-indigo-400">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 bg-indigo-950/60 border border-indigo-800/40 rounded-lg text-indigo-400 shrink-0">
               <BookOpen className="w-5 h-5" />
             </div>
-            <div>
-              <h2 id="source-inspector-title" className="text-base font-semibold text-slate-100">
-                Source Grounding Inspector
+            <div className="min-w-0">
+              <h2 id="source-inspector-title" className="text-base font-semibold text-slate-100 flex items-center gap-2">
+                <span>Source Grounding Inspector</span>
+                {citationAnchor && (
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-950/80 border border-indigo-700/60 text-indigo-300">
+                    {citationAnchor}
+                  </span>
+                )}
               </h2>
-              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                <span className="font-mono text-indigo-400">{material?.courseCode || 'Course Material'}</span>
+              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 truncate">
+                <span className="font-mono text-indigo-400 shrink-0">{material?.courseCode || 'Course Material'}</span>
                 <span aria-hidden="true">·</span>
-                <span>{title}</span>
+                <span className="truncate">{title}</span>
               </div>
             </div>
           </div>
           <button
             onClick={onClose}
             aria-label="Close modal"
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 rounded-lg transition-colors shrink-0 ml-2"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Informational Subheader */}
-        <div className="px-6 py-3 bg-slate-900/60 border-b border-slate-800/70 flex items-center justify-between text-xs text-slate-300">
+        <div className="px-6 py-3 bg-slate-900/60 border-b border-slate-800/70 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
-              All citations link to verifiable text passages extracted from your course materials.
+              All citations link to verifiable verbatim text passages extracted from your course materials.
             </span>
           </div>
           <span className="text-slate-400 font-mono text-[11px]">
-            {chunksToDisplay.length} {chunksToDisplay.length === 1 ? 'passage' : 'passages'} available
+            {chunksToDisplay.length} {chunksToDisplay.length === 1 ? 'passage' : 'passages'} indexed
           </span>
         </div>
 
@@ -97,7 +132,16 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
             chunksToDisplay.map((chunk, idx) => {
               const text = 'extractedText' in chunk ? chunk.extractedText : chunk.excerpt;
               const heading = chunk.sectionHeading || `Section Anchor #${idx + 1}`;
+              const chunkUniqueId = 'id' in chunk ? chunk.id : `chunk-${idx}`;
               
+              // Determine if this chunk is the active citation supporting chunk
+              const isHighlighted = Boolean(
+                targetChunkId &&
+                  ('id' in chunk
+                    ? chunk.id === targetChunkId
+                    : false)
+              );
+
               // Compute honest source anchor label without inventing fake page numbers
               let anchorDisplay = '';
               const docType = material?.fileType || ('documentType' in chunk ? chunk.documentType : undefined);
@@ -109,7 +153,6 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
               } else if (docType === 'pptx' || (sNum !== undefined)) {
                 anchorDisplay = `Slide ${sNum ?? chunk.pageOrSlideNumber ?? idx + 1}`;
               } else {
-                // Word, Markdown, Plain Text: use honest section/chunk anchor
                 anchorDisplay =
                   ('anchorLabel' in chunk && chunk.anchorLabel)
                     ? chunk.anchorLabel
@@ -124,8 +167,13 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
 
               return (
                 <div
-                  key={'id' in chunk ? chunk.id : idx}
-                  className="bg-[#0B0F19] border border-slate-800/90 rounded-lg p-4 transition-all hover:border-slate-700"
+                  key={chunkUniqueId}
+                  ref={isHighlighted ? highlightedRef : undefined}
+                  className={`rounded-xl p-4 transition-all ${
+                    isHighlighted
+                      ? 'bg-indigo-950/40 border-2 border-indigo-500 shadow-lg shadow-indigo-950/60 ring-1 ring-indigo-400/50'
+                      : 'bg-[#0B0F19] border border-slate-800/90 hover:border-slate-700'
+                  }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800/60">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -138,14 +186,20 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
                       <span className="text-slate-400 font-mono text-[11px] truncate max-w-xs">
                         {docFilename}
                       </span>
+                      {isHighlighted && (
+                        <span className="ml-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          Supporting Evidence for Citation
+                        </span>
+                      )}
                     </div>
 
                     <button
-                      onClick={() => handleCopy(text)}
+                      onClick={() => handleCopy(chunkUniqueId, text)}
                       className="self-end sm:self-auto flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 transition-colors"
                       title="Copy excerpt text"
                     >
-                      {copied ? (
+                      {copiedId === chunkUniqueId ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
                           <span className="text-emerald-400">Copied</span>
@@ -159,12 +213,15 @@ export const SourceChunkViewerModal: React.FC<SourceChunkViewerModalProps> = ({
                     </button>
                   </div>
 
-                  <p className="text-sm text-slate-300 leading-relaxed font-sans font-normal whitespace-pre-wrap">
+                  <p className="text-sm text-slate-200 leading-relaxed font-sans font-normal whitespace-pre-wrap">
                     {text}
                   </p>
 
                   <div className="mt-3 pt-2 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Source passage: Verbatim extracted text</span>
+                    <span className="flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500/70" />
+                      <span>Verbatim extracted passage</span>
+                    </span>
                     <span className="font-mono">
                       {'tokenEstimate' in chunk && chunk.tokenEstimate
                         ? `~${chunk.tokenEstimate} tokens`

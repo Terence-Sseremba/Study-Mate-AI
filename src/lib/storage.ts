@@ -180,3 +180,31 @@ export function setStoredReviewRecords(
     return false;
   }
 }
+
+const STORAGE_KEY_TUTOR_INTERACTION_MODE = 'studymate_tutor_interaction_mode';
+
+export function getStoredTutorInteractionMode(): import('../types').TutorInteractionMode {
+  if (!isStorageAvailable()) return 'smart_tutor';
+  try {
+    const val = window.localStorage.getItem(STORAGE_KEY_TUTOR_INTERACTION_MODE);
+    if (val === 'grounded_study' || val === 'smart_tutor') {
+      return val;
+    }
+    return 'smart_tutor';
+  } catch {
+    return 'smart_tutor';
+  }
+}
+
+export function setStoredTutorInteractionMode(
+  mode: import('../types').TutorInteractionMode
+): boolean {
+  if (!isStorageAvailable()) return false;
+  try {
+    window.localStorage.setItem(STORAGE_KEY_TUTOR_INTERACTION_MODE, mode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
