@@ -266,14 +266,20 @@ export default function App() {
   } | null>(null);
 
   useEffect(() => {
-    // Check backend API status
+    // Check backend API status safely
     fetch('/api/status')
-      .then((res) => res.json())
+      .then(async (res) => {
+        const contentType = res.headers.get('content-type') || '';
+        if (!res.ok || !contentType.includes('application/json')) {
+          throw new Error(`Unexpected status response (${res.status})`);
+        }
+        return res.json();
+      })
       .then((data) => {
         setApiStatus({
-          apiKeyConfigured: data.apiKeyConfigured,
-          model: data.model,
-          groundingEngine: data.groundingEngine,
+          apiKeyConfigured: Boolean(data.apiKeyConfigured),
+          model: data.model || 'gemini-3.8-flash',
+          groundingEngine: data.groundingEngine || 'Local-Semantic-Index + Relevance Gate',
         });
       })
       .catch((err) => {
@@ -417,8 +423,31 @@ export default function App() {
         }),
       });
 
+      const contentType = response.headers.get('content-type') || '';
+      const isJson = contentType.includes('application/json');
+
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to reach tutor API`);
+        let serverErrorMsg: string | undefined;
+        if (isJson) {
+          try {
+            const errPayload = await response.json();
+            if (typeof errPayload?.error === 'string' && errPayload.error.trim()) {
+              serverErrorMsg = errPayload.error.trim();
+            }
+          } catch {
+            // Ignore malformed JSON on error response
+          }
+        }
+        const statusErr: any = new Error(
+          serverErrorMsg || `HTTP ${response.status}: Failed to reach tutor API`
+        );
+        statusErr.status = response.status;
+        statusErr.serverMessage = serverErrorMsg;
+        throw statusErr;
+      }
+
+      if (!isJson) {
+        throw new Error('Received non-JSON response from tutor endpoint');
       }
 
       const data = await response.json();
@@ -448,10 +477,20 @@ export default function App() {
     } catch (err: any) {
       console.warn('API chat request encountered error:', err);
 
-      const isTimeout = err?.name === 'AbortError' || err?.message?.includes('timeout');
-      const userErrorMessage = isTimeout
-        ? 'StudyMate is taking longer than expected. Please try again.'
-        : "StudyMate's AI service is temporarily unavailable. Please retry.";
+      const status = err?.status;
+      const isTimeout =
+        status === 504 ||
+        err?.name === 'AbortError' ||
+        err?.message?.toLowerCase()?.includes('timeout') ||
+        err?.message?.toLowerCase()?.includes('longer than expected');
+      const isRateLimit = status === 429;
+      const userErrorMessage =
+        err?.serverMessage ||
+        (isTimeout
+          ? 'StudyMate is taking longer than expected. Please try again.'
+          : isRateLimit
+          ? 'AI usage limit reached. Please try again in a moment.'
+          : "StudyMate's AI service is temporarily unavailable. Please retry.");
 
       const failureMsg: TutorMessage = {
         id: `msg-tutor-err-${Date.now()}`,
@@ -463,6 +502,7 @@ export default function App() {
         canRetry: true,
         failedQuestion: question,
         failedMaterialFilter: materialId,
+        failedSelectedMaterialIds: selectedMaterialIds,
         interactionMode: tutorInteractionMode,
         route: 'error',
       };
@@ -475,7 +515,12 @@ export default function App() {
   const handleRetryMessage = async (failedMsg: TutorMessage) => {
     setTutorMessages((prev) => prev.filter((m) => m.id !== failedMsg.id));
     if (failedMsg.failedQuestion) {
-      await handleSendMessage(failedMsg.failedQuestion, failedMsg.failedMaterialFilter, true);
+      await handleSendMessage(
+        failedMsg.failedQuestion,
+        failedMsg.failedMaterialFilter,
+        true,
+        failedMsg.failedSelectedMaterialIds
+      );
     }
   };
 

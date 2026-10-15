@@ -625,6 +625,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
   // Handle source checkbox toggle
   const toggleGrounding = (materialId: string) => {
+    if (activeMaterialFilter && onMaterialFilterChange) {
+      onMaterialFilterChange(undefined);
+    }
     setActiveGroundingIds((prev) => ({
       ...prev,
       [materialId]: prev[materialId] === false ? true : false,
@@ -711,7 +714,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     if (promptOverride === undefined) {
       setInputText('');
     }
-    await onSendMessage(text, activeMaterialFilter, false, selectedMaterialIds);
+    const effectiveMaterialFilter =
+      activeMaterialFilter &&
+      selectedMaterialIds.length === 1 &&
+      selectedMaterialIds[0] === activeMaterialFilter
+        ? activeMaterialFilter
+        : undefined;
+    await onSendMessage(text, effectiveMaterialFilter, false, selectedMaterialIds);
   };
 
   const handleCopyText = async (text: string, id: string) => {
@@ -781,28 +790,41 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         type="file"
         accept=".pdf"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+        onChange={(e) => {
+          if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
+          e.currentTarget.value = '';
+        }}
       />
       <input
         ref={docxInputRef}
         type="file"
         accept=".docx"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+        onChange={(e) => {
+          if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
+          e.currentTarget.value = '';
+        }}
       />
       <input
         ref={pptxInputRef}
         type="file"
         accept=".pptx"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+        onChange={(e) => {
+          if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
+          e.currentTarget.value = '';
+        }}
       />
       <input
+        id="workspace-file-upload"
         ref={generalFileInputRef}
         type="file"
         accept=".pdf,.docx,.pptx,.md,.txt"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+        onChange={(e) => {
+          if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
+          e.currentTarget.value = '';
+        }}
       />
 
       {/* ======================================================== */}
@@ -1557,9 +1579,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 hover:bg-neutral-200/70 text-neutral-700 font-mono text-[11px] font-medium transition-colors cursor-pointer border border-neutral-200/60"
                   type="button"
                   onClick={() => {
-                    const target = materials[0]?.id;
-                    if (onMaterialFilterChange) {
-                      onMaterialFilterChange(activeMaterialFilter ? undefined : target);
+                    setSourcesCollapsed((prev) => !prev);
+                    if (activeMaterialFilter && onMaterialFilterChange) {
+                      onMaterialFilterChange(undefined);
                     }
                   }}
                   title="Selected sources used for grounding"

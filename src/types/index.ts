@@ -114,6 +114,7 @@ export interface TutorMessage {
   canRetry?: boolean;
   failedQuestion?: string;
   failedMaterialFilter?: string;
+  failedSelectedMaterialIds?: string[];
 }
 
 export type DifficultyLevel = 'foundational' | 'foundation' | 'intermediate' | 'advanced';

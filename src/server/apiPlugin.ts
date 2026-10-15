@@ -53,55 +53,80 @@ function getGeminiApiKey(): string | undefined {
 }
 
 /**
- * Vite Dev Server plugin providing server-side API endpoints for StudyMate AI.
- * Keeps API keys and sensitive operations strictly on the server-side.
+ * Shared handler for GET /api/status (supports Vite dev middleware and Vercel Serverless Functions).
  */
-export function studyMateApiPlugin(): Plugin {
-  return {
-    name: 'studymate-api-routes',
-    configureServer(server: ViteDevServer) {
-      server.middlewares.use(async (req, res, next) => {
-        const url = req.url?.split('?')[0];
+export function handleStatusRequest(_req: any, res: any): void {
+  const apiKey = getGeminiApiKey();
+  const hasApiKey = Boolean(apiKey);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(
+    JSON.stringify({
+      status: 'ok',
+      apiKeyConfigured: hasApiKey,
+      model: 'gemini-3.8-flash',
+      groundingEngine: 'Local-Semantic-Index + Relevance Gate',
+      timestamp: new Date().toISOString(),
+    })
+  );
+}
 
-        // 1. GET /api/status - Check backend status and Gemini API key availability
-        if (url === '/api/status' && req.method === 'GET') {
-          const apiKey = getGeminiApiKey();
-          const hasApiKey = Boolean(apiKey);
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.end(
-            JSON.stringify({
-              status: 'ok',
-              apiKeyConfigured: hasApiKey,
-              model: 'gemini-3.8-flash',
-              groundingEngine: 'Local-Semantic-Index + Relevance Gate',
-              timestamp: new Date().toISOString(),
-            })
-          );
-          return;
-        }
+/**
+ * Helper to read JSON body from either pre-parsed req.body (Vercel) or raw Node stream (Vite).
+ */
+async function readRequestJsonBody(req: any): Promise<{ ok: true; data: any } | { ok: false }> {
+  if (req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'object') {
+      return { ok: true, data: req.body };
+    }
+    if (typeof req.body === 'string') {
+      try {
+        return { ok: true, data: JSON.parse(req.body || '{}') };
+      } catch {
+        return { ok: false };
+      }
+    }
+  }
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', (chunk: any) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      try {
+        resolve({ ok: true, data: JSON.parse(body || '{}') });
+      } catch {
+        resolve({ ok: false });
+      }
+    });
+    req.on('error', () => {
+      resolve({ ok: false });
+    });
+  });
+}
 
-        // 2. POST /api/tutor or /api/tutor/chat - Intelligent Tutor Routing, Relevance Validation & Resilient Answering
-        if ((url === '/api/tutor' || url === '/api/tutor/chat') && req.method === 'POST') {
-          let body = '';
-          req.on('data', (chunk) => {
-            body += chunk;
-          });
+/**
+ * Shared handler for POST /api/tutor and POST /api/tutor/chat.
+ */
+export async function handleTutorChatRequest(req: any, res: any): Promise<void> {
+  const sendJson = (statusCode: number, payload: any) => {
+    res.statusCode = statusCode;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(payload));
+  };
 
-          req.on('end', async () => {
-            const sendJson = (statusCode: number, payload: any) => {
-              res.statusCode = statusCode;
-              res.setHeader('Content-Type', 'application/json; charset=utf-8');
-              res.end(JSON.stringify(payload));
-            };
+  if (req.method !== 'POST') {
+    sendJson(405, { error: 'Method not allowed', route: 'error' });
+    return;
+  }
 
-            try {
-              let data: any = {};
-              try {
-                data = JSON.parse(body || '{}');
-              } catch {
-                sendJson(400, { error: 'Invalid JSON request payload', route: 'error' });
-                return;
-              }
+  try {
+    const parsed = await readRequestJsonBody(req);
+    if (!parsed.ok) {
+      sendJson(400, { error: 'Invalid JSON request payload', route: 'error' });
+      return;
+    }
+    const data = parsed.data;
 
               const {
                 question: rawQuestion,
@@ -504,15 +529,34 @@ STRICT INTEGRITY DIRECTIVES:
                 model: 'StudyMate Educational Engine',
                 apiKeyConfigured: false,
               });
-            } catch (err: any) {
-              console.error('Unhandled error in /api/tutor:', err);
-              sendJson(500, {
-                error: 'The AI service is temporarily unavailable.',
-                route: 'error',
-                canRetry: true,
-              });
-            }
-          });
+  } catch (err: any) {
+    console.error('Unhandled error in /api/tutor:', err);
+    sendJson(500, {
+      error: 'The AI service is temporarily unavailable.',
+      route: 'error',
+      canRetry: true,
+    });
+  }
+}
+
+/**
+ * Vite Dev Server plugin providing server-side API endpoints for StudyMate AI.
+ * Keeps API keys and sensitive operations strictly on the server-side.
+ */
+export function studyMateApiPlugin(): Plugin {
+  return {
+    name: 'studymate-api-routes',
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url?.split('?')[0];
+
+        if (url === '/api/status' && req.method === 'GET') {
+          handleStatusRequest(req, res);
+          return;
+        }
+
+        if ((url === '/api/tutor' || url === '/api/tutor/chat') && req.method === 'POST') {
+          await handleTutorChatRequest(req, res);
           return;
         }
 

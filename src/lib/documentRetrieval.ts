@@ -102,14 +102,29 @@ const GENERIC_INQUIRY_NOUNS = new Set([
   'property', 'properties', 'benefit', 'benefits', 'advantage', 'advantages',
   'disadvantage', 'disadvantages', 'limitation', 'limitations', 'challenge',
   'challenges', 'impact', 'impacts', 'effect', 'effects', 'cause', 'causes',
-  'reason', 'reasons', 'problem', 'problems', 'solution', 'solutions'
+  'reason', 'reasons', 'problem', 'problems', 'solution', 'solutions',
+  'evaluation', 'evaluated', 'judging', 'grading', 'rubric', 'metrics',
+  'scoring', 'bonus', 'optional', 'enhancement', 'enhancements',
+  'statement', 'context', 'background', 'scope', 'goal', 'goals',
+  'stretch', 'point', 'points', 'purpose', 'description', 'detail', 'details'
 ]);
 
 const REQUIREMENT_SYNONYMS = new Set([
   'requirement', 'requirements', 'require', 'requires', 'required',
   'deliverable', 'deliverables', 'criteria', 'criterion', 'specification',
   'specifications', 'objective', 'objectives', 'mandatory', 'must',
-  'expectation', 'expectations', 'guideline', 'guidelines'
+  'expectation', 'expectations', 'guideline', 'guidelines',
+  'evaluation', 'evaluated', 'judging', 'grading', 'rubric', 'metrics', 'scoring'
+]);
+
+const ENHANCEMENT_SYNONYMS = new Set([
+  'bonus', 'optional', 'enhancement', 'enhancements', 'extra', 'addition', 'additions',
+  'stretch', 'goal', 'goals', 'point', 'points'
+]);
+
+const CHALLENGE_SYNONYMS = new Set([
+  'problem', 'problems', 'statement', 'challenge', 'challenges', 'context',
+  'background', 'objective', 'objectives', 'goal', 'goals', 'purpose'
 ]);
 
 /**
@@ -161,6 +176,12 @@ export function wordsMatch(w1: string, w2: string): boolean {
     return true;
   }
   if (REQUIREMENT_SYNONYMS.has(clean1) && REQUIREMENT_SYNONYMS.has(clean2)) {
+    return true;
+  }
+  if (ENHANCEMENT_SYNONYMS.has(clean1) && ENHANCEMENT_SYNONYMS.has(clean2)) {
+    return true;
+  }
+  if (CHALLENGE_SYNONYMS.has(clean1) && CHALLENGE_SYNONYMS.has(clean2)) {
     return true;
   }
   if ((w1 === 'flip-flops' && w2 === 'flip') || (w1 === 'flip' && w2 === 'flip-flops')) return true;
@@ -402,7 +423,10 @@ export function retrieveRelevantChunks(
     : null;
 
   // 1. Filter materials based on user selection
-  const eligibleMaterials = materials.filter((m) => {
+  const eligibleMaterials = (materials || []).filter((m) => {
+    if (!m || !m.id) {
+      return false;
+    }
     if (materialIdFilter && m.id !== materialIdFilter) {
       return false;
     }
@@ -470,6 +494,14 @@ export function retrieveRelevantChunks(
   }
 
   // 3. Score every chunk using phrase matching, stemming-aware tokens, derived headings, and proximity
+  const tokenMatchesAt = (words: string[], idx: number, kw: string): boolean => {
+    if (!wordsMatch(words[idx], kw)) return false;
+    if (kw.length === 1) {
+      return idx > 0 && DESIGNATOR_PREFIXES.has(words[idx - 1]);
+    }
+    return true;
+  };
+
   const scoredList: ScoredChunkMatch[] = allChunks.map((chunk, idx) => {
     const rawText = chunk.extractedText || '';
     const textLower = rawText.toLowerCase();
@@ -479,6 +511,16 @@ export function retrieveRelevantChunks(
     const headingLower = effectiveHeading.toLowerCase();
     const docTitleLower = `${chunk.materialTitle || ''} ${(chunk.filename || '').replace(/[_-]/g, ' ')}`.toLowerCase();
 
+    // Normalize punctuation into spaces before splitting into word tokens
+    const textWords = textLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+    const headingWords = headingLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+    const titleWords = docTitleLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+
+    const specificKeywords = queryKeywords.filter((k) => !GENERIC_INQUIRY_NOUNS.has(k));
+    const nonTitleSpecificKeywords = specificKeywords.filter(
+      (k) => !titleWords.some((_, tIdx) => tokenMatchesAt(titleWords, tIdx, k))
+    );
+
     // A. Check exact multi-word phrase match in heading, text, or document title
     let exactPhraseFound = false;
     let headingPhraseMatch = false;
@@ -486,7 +528,19 @@ export function retrieveRelevantChunks(
     for (const phrase of queryPhrases) {
       const cleanPhrase = phrase.toLowerCase().trim();
       if (cleanPhrase.length >= 4) {
-        if (headingLower.includes(cleanPhrase) || docTitleLower.includes(cleanPhrase)) {
+        // When the query specifies non-title subject keywords (e.g. "Technical Considerations" or "sequential circuits"
+        // alongside "Track D"), only count phrases that include at least one non-title subject keyword.
+        if (nonTitleSpecificKeywords.length > 0) {
+          const phraseTokens = cleanPhrase.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+          const hasNonTitleTopic = nonTitleSpecificKeywords.some((ntk) =>
+            phraseTokens.some((pt, pIdx) => tokenMatchesAt(phraseTokens, pIdx, ntk))
+          );
+          if (!hasNonTitleTopic) {
+            continue;
+          }
+        }
+
+        if (headingLower.includes(cleanPhrase)) {
           headingPhraseMatch = true;
           exactPhraseFound = true;
           break;
@@ -495,26 +549,28 @@ export function retrieveRelevantChunks(
           exactPhraseFound = true;
           break;
         }
+        if (nonTitleSpecificKeywords.length === 0 && docTitleLower.includes(cleanPhrase)) {
+          exactPhraseFound = true;
+          break;
+        }
       }
     }
 
     // B. Stemming and word-boundary keyword matches and token positions
     const matchedKeywords: string[] = [];
+    const matchedContentKeywords: string[] = [];
     let termMatchesCount = 0;
     const tokenPositions: number[] = [];
 
-    // Normalize punctuation into spaces before splitting into word tokens
-    const textWords = textLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
-    const headingWords = headingLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
-    const titleWords = docTitleLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
-
     for (const kw of queryKeywords) {
       let matchedInChunk = false;
+      let matchedInContentOrHeading = false;
 
       // Find occurrences of kw in textWords
       for (let wIdx = 0; wIdx < textWords.length; wIdx++) {
-        if (wordsMatch(textWords[wIdx], kw)) {
+        if (tokenMatchesAt(textWords, wIdx, kw)) {
           matchedInChunk = true;
+          matchedInContentOrHeading = true;
           tokenPositions.push(wIdx);
           termMatchesCount++;
         }
@@ -522,35 +578,67 @@ export function retrieveRelevantChunks(
 
       // Check heading matches
       for (let hIdx = 0; hIdx < headingWords.length; hIdx++) {
-        if (wordsMatch(headingWords[hIdx], kw)) {
+        if (tokenMatchesAt(headingWords, hIdx, kw)) {
           matchedInChunk = true;
+          matchedInContentOrHeading = true;
           termMatchesCount += 1.5;
         }
       }
 
       // Check title matches
       for (let tIdx = 0; tIdx < titleWords.length; tIdx++) {
-        if (wordsMatch(titleWords[tIdx], kw)) {
+        if (tokenMatchesAt(titleWords, tIdx, kw)) {
           matchedInChunk = true;
-          termMatchesCount += 0.75;
+          termMatchesCount += 0.5;
         }
       }
 
       if (matchedInChunk) {
         matchedKeywords.push(kw);
       }
+      if (matchedInContentOrHeading) {
+        matchedContentKeywords.push(kw);
+      }
     }
 
-    const specificKeywords = queryKeywords.filter((k) => !GENERIC_INQUIRY_NOUNS.has(k));
-    const headingKeywordCheckList = specificKeywords.length > 0 ? specificKeywords : queryKeywords;
+    // If the query asks about specific concepts outside the document title (e.g., "Technical Considerations"
+    // or "sequential circuits" in Track D), the chunk's own text/heading MUST match those concepts.
+    if (nonTitleSpecificKeywords.length > 0) {
+      const matchedNonTitle = nonTitleSpecificKeywords.filter((k) =>
+        matchedContentKeywords.includes(k)
+      );
+      if (
+        matchedNonTitle.length === 0 ||
+        (nonTitleSpecificKeywords.length >= 2 &&
+          !exactPhraseFound &&
+          matchedNonTitle.length / nonTitleSpecificKeywords.length < 0.5)
+      ) {
+        return {
+          chunk,
+          score: 0,
+          matchedKeywords: [],
+          exactPhraseFound: false,
+          headingMatch: false,
+        };
+      }
+    }
+
+    const headingKeywordCheckList =
+      nonTitleSpecificKeywords.length > 0
+        ? nonTitleSpecificKeywords
+        : specificKeywords.length > 0
+        ? specificKeywords
+        : queryKeywords;
 
     const headingMatch =
       headingPhraseMatch ||
-      headingKeywordCheckList.some(
-        (kw) =>
-          headingWords.some((hw) => wordsMatch(hw, kw)) ||
-          titleWords.some((tw) => wordsMatch(tw, kw))
-      );
+      headingKeywordCheckList.some((kw) =>
+        headingWords.some((_, hIdx) => tokenMatchesAt(headingWords, hIdx, kw))
+      ) ||
+      (nonTitleSpecificKeywords.length === 0 &&
+        queryKeywords.some((kw) =>
+          headingWords.some((_, hIdx) => tokenMatchesAt(headingWords, hIdx, kw))
+        ));
 
     // C. Proximity span: minimum distance containing matched keywords
     let proximitySpan = 999;
@@ -571,9 +659,9 @@ export function retrieveRelevantChunks(
     let rawScore = 0;
 
     if (exactPhraseFound) {
-      rawScore += headingPhraseMatch ? 0.85 : 0.72;
+      rawScore += headingPhraseMatch ? 0.85 : headingMatch ? 0.78 : 0.68;
       rawScore += keywordCoverage * 0.22;
-      rawScore += Math.min(termMatchesCount, 6) * 0.01;
+      rawScore += Math.min(termMatchesCount, 6) * 0.015;
     } else {
       rawScore += keywordCoverage * 0.45;
       if (headingMatch) rawScore += 0.25;
@@ -614,7 +702,7 @@ export function retrieveRelevantChunks(
     }));
   }
 
-  // 6. Include immediate continuation chunk when a heading/section match spans consecutive chunks
+  // 6. Include immediate continuation chunk only when it also has genuine keyword relevance
   const selectedIds = new Set(qualifyingMatches.slice(0, maxResults).map((m) => m.chunk.id));
   const topMatches = [...qualifyingMatches.slice(0, maxResults)];
 
@@ -632,17 +720,9 @@ export function retrieveRelevantChunks(
         : undefined;
     if (nextChunk) {
       const nextScored = scoredList.find((s) => s.chunk.id === nextChunk.id);
-      topMatches.push(
-        nextScored && nextScored.score > 0.35
-          ? nextScored
-          : {
-              chunk: nextChunk,
-              score: Math.max(0.42, primary.score - 0.15),
-              matchedKeywords: primary.matchedKeywords,
-              exactPhraseFound: false,
-              headingMatch: false,
-            }
-      );
+      if (nextScored && nextScored.score >= 0.30 && nextScored.matchedKeywords.length > 0) {
+        topMatches.push(nextScored);
+      }
     }
   }
 
