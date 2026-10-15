@@ -163,8 +163,10 @@ export function classifyUploadedFile(file: File): FileClassification {
  */
 function cleanText(rawText: string): string {
   if (!rawText) return '';
-  return rawText
+  return decodeXmlEntities(rawText)
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/\b([A-Z])(?:\s+([A-Z])){2,}\b/g, (m) => m.replace(/\s+/g, ''))
+    .replace(/\b([A-Za-z])(?:\s+([a-z])){2,}\b/g, (m) => m.replace(/\s+/g, ''))
     .replace(/[ \t]+/g, ' ')
     .replace(/\n\s*\n\s*\n+/g, '\n\n')
     .trim();
@@ -200,8 +202,390 @@ const TRAILING_NOISE_WORDS = new Set([
   'at', 'from', 'as', 'into', 'that', 'which', 'who', 'is', 'are', 'was', 'were',
   'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
   'would', 'shall', 'should', 'may', 'might', 'must', 'can', 'could', 'this',
-  'these', 'those', 'their', 'our', 'your', 'its'
+  'these', 'those', 'their', 'our', 'your', 'its', 'it', 'we', 'i', 'you', 'they',
+  'he', 'she', 'not', 'no', 'if', 'when', 'where', 'how', 'why', 'what',
+  'there', 'here', 'like', 'then', 'than', 'also', 'only', 'even', 'still',
+  'just', 'very', 'more', 'most', 'some', 'many', 'much', 'such', 'about',
+  'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below'
 ]);
+
+/**
+ * Checks whether a heading represents non-instructional frontmatter or backmatter
+ * (e.g., Dedication, Table of Contents, Acknowledgments, References, Bibliography).
+ */
+export function isFrontmatterOrBackmatterHeading(text?: string): boolean {
+  if (!text) return false;
+  const cleaned = text
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^(?:chapter|section|part)\s*\d*\s*[:\-–—]?\s*/i, '')
+    .replace(/\s+\d{1,4}$/, '')
+    .replace(/[:\-–—.]+$/, '')
+    .trim();
+  return /^(?:dedication|contents|table\s+of\s+contents|brief\s+contents|acknowledg(?:e)?ments?|preface|foreword|copyright(?:\s+page)?|bibliography|references|works\s+cited|literature\s+cited|further\s+reading|suggested\s+reading|index|author\s+index|subject\s+index|about\s+the\s+author|credits|permissions|endnotes|footnotes|list\s+of\s+(?:figures|tables|illustrations|abbreviations))$/i.test(
+    cleaned
+  );
+}
+
+/**
+ * Detects lines containing author names, student index/registration numbers,
+ * university/institution banners, running page headers, exam instructions,
+ * multiple-choice option rows, or bibliography citations.
+ */
+export function isMetadataOrNoiseLine(rawLine?: string, materialTitle?: string): boolean {
+  if (!rawLine) return true;
+  const line = decodeXmlEntities(rawLine).replace(/\s+/g, ' ').trim();
+  if (!line || line.length < 3) return true;
+
+  // Bare page numbers or roman numerals
+  if (/^(?:page\s*\d+(?:\s*of\s*\d+)?|\d+\s*\/\s*\d+|\d+|[ivxlcdm]+)$/i.test(line)) {
+    return true;
+  }
+
+  // Explicit Author / Byline / Student / Instructor / Examiner / Course metadata labels
+  if (
+    /^(?:written\s+by|prepared\s+by|submitted\s+by|compiled\s+by|presented\s+by|edited\s+by|translated\s+by|student\s+name|candidate\s+name|name\s+of\s+(?:student|candidate)|group\s+(?:members?|no|number)|team\s+members?|course\s*(?:code|title|name|unit|no|number)|subject\s*(?:code|name)|paper\s*(?:code|no)|module\s*(?:code|leader)|academic\s+year|time\s+allowed|total\s+marks|candidate\s+roster|student\s+roster|class\s+list|attendance\s+list)\b/i.test(
+      line
+    ) ||
+    /^(?:author|authors|student|candidate|instructor|lecturer|professor|supervisor|examiner|tutor|facilitator|department|faculty|college|school|university|semester|date|duration)\s*[:\-–—]/i.test(
+      line
+    )
+  ) {
+    return true;
+  }
+  if (/^name\s*[:\-–—]\s*[A-Z]/i.test(line)) return true;
+  if (/^[Bb]y\s*[:\-–—]?\s+[A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+/.test(line)) return true;
+
+  // Academic titles / honorifics / credentials in byline-length lines
+  if (
+    line.length < 95 &&
+    /\b(?:Prof\.|Dr\.|Mr\.|Mrs\.|Ms\.|Eng\.|Ph\.?D\.?|M\.?Sc\.?|B\.?Sc\.?|B\.?A\.?|M\.?A\.?)\b/.test(
+      line
+    )
+  ) {
+    return true;
+  }
+
+  // Student Index / Registration / Matriculation / Roll / Candidate numbers
+  if (
+    /\b(?:index\s*(?:no|number|#)|reg(?:istration)?\s*(?:no|number|#)|student\s*(?:id|no|number|#)|matric(?:ulation)?\s*(?:no|number|#)|candidate\s*(?:no|number|#)|roll\s*(?:no|number|#)|admission\s*(?:no|number|#)|exam(?:ination)?\s*(?:no|number|#)|seat\s*(?:no|number|#))\b/i.test(
+      line
+    )
+  ) {
+    return true;
+  }
+  if (/^index\s*(?:no|number|#)?\s*[:\-–—]?\s*\d/i.test(line)) return true;
+
+  // University / School registration & index slash/hyphen codes (e.g., 22/U/14892/PS, 2022/HD05/1294U, U0001/501, CSC/2023/001)
+  if (
+    /\b\d{2,4}\/[A-Z0-9]{1,6}\/\d{2,}[A-Z0-9/]*\b/i.test(line) ||
+    /\b[A-Z]\d{3,5}\/\d{3,5}\b/i.test(line) ||
+    /\b[A-Z]{2,5}\s*[/\-]\s*\d{2,4}\s*[/\-]\s*\d{2,}[A-Z0-9]*\b/i.test(line) ||
+    /\b\d{8,14}\b/.test(line)
+  ) {
+    return true;
+  }
+
+  // Institutional / University / Faculty / Olympiad / Exam banners
+  if (
+    /\b(?:admission\s+ticket|examination\s+card|academic\s+year|marks\s+each|time\s+allowed|instructions\s+to\s+candidates|all\s+rights\s+reserved|isbn\s*[:\d-]|issn\s*[:\d-]|doi\s*:)\b/i.test(
+      line
+    )
+  ) {
+    return true;
+  }
+  if (
+    line.length < 90 &&
+    /^(?:department|faculty|school|college|institute|university|ministry)\s+of\b/i.test(line)
+  ) {
+    return true;
+  }
+  if (
+    /^[A-Z0-9\s,&'().:-]{6,}$/.test(line) &&
+    /\b(?:UNIVERSITY|INSTITUTE|COLLEGE|FACULTY|SCHOOL|DEPARTMENT|MINISTRY|ACADEMY|POLYTECHNIC|OLYMPIAD|COMPETITION|EXAMINATION|SEMESTER|HACKATHON|ROSTER|CANDIDATE)\b/.test(
+      line
+    )
+  ) {
+    return true;
+  }
+  if (/^multimodal\s+ai\s+hackathon\b/i.test(line)) return true;
+  if (/^problems?\s+\d+\s*[-–—]\s*\d+/i.test(line)) return true;
+  if (/^(?:question|problem|exercise|task)\s*#?\d*(?:\s*\([^)]*\))?$/i.test(line)) return true;
+
+  // Multiple-choice option rows (e.g. "A) 2 B) 3 C) 4 D) 5")
+  if (/^(?:[A-E][).]\s+)/.test(line) || /\bA[).]\s+\S+.*\bB[).]\s+\S+/.test(line)) {
+    return true;
+  }
+
+  // Running page headers with leading or trailing page numbers (e.g., "16 WHO WROTE THE BIBLE?", "Who Wrote the Bible? 19")
+  if (/^\d{1,4}\s+[A-Z\s?'":,-]{4,}$/.test(line)) return true;
+  if (/^\d{2,4}\s+[A-Z][A-Za-z0-9\s?'":,-]{3,}$/.test(line)) return true;
+  if (
+    /^[A-Z][A-Za-z0-9\s?'":,&-]{3,}\s+\d{1,4}$/.test(line) &&
+    !/^(?:chapter|part|section|module|unit|track|lecture|problem|question|figure|table|page|slide|step|stage|phase|level|rule)\s+\d+$/i.test(
+      line
+    )
+  ) {
+    return true;
+  }
+
+  // Bibliography / Reference citation lines (e.g., "Newey, S. and R. Seed. 1995...", "Owens, E. H. 1978.")
+  if (
+    /^[A-Z][a-zA-Z'-]+,\s*(?:[A-Z]\.\s*)+/.test(line) ||
+    /^[A-Z][a-zA-Z'-]+,\s+[A-Z][a-zA-Z'-]+\s+(?:and|&)\s+[A-Z]/.test(line) ||
+    /\b(?:19|20)\d{2}[a-z]?\.\s+[A-Z]/.test(line) ||
+    /\(\s*(?:19|20)\d{2}[a-z]?\s*\)\./.test(line) ||
+    /\b(?:J\.\s+Exp|Mar\.\s+Biol|Ecol\.\s+Monogr|Bull\.\s+Mar|Comm\.\s+ACM|pp\.\s*\d+|vol\.\s*\d+|\d+\(\d+\)\s*:\s*\d+)\b/i.test(
+      line
+    )
+  ) {
+    return true;
+  }
+
+  // Personal name bylines (e.g. "Luaa Leron & Golden Prince", "Mukasa David and Kato Paul")
+  // Exclude academic/conceptual headings (words ending in -tion, -sion, -ment, -cies, -al, -ic, -ics, -logy, -ing, etc.)
+  if (
+    /^[A-Z][a-z]{1,18}(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]{1,18}\s*(?:&|and|,)\s*[A-Z][a-z]{1,18}(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]{1,18}$/.test(
+      line
+    ) &&
+    !/\b(?:[A-Za-z]+(?:tion|sion|ment|ance|ence|ity|ism|ics|logy|graphy|metry|cies|ties|ing|ive|al|ic|ous|ble|ular|ary|ory)s?|database|data|system|systems|network|networks|software|hardware|algorithm|algorithms|structure|structures|calculus|algebra|matrix|vector|circuit|circuits|theorem|theory|model|models|method|methods|analysis|design|control|process|processes|energy|force|quantum|cell|cells|gene|genes|species|market|supply|demand|cost|price|value|state|states|church|bible|god|jesus|ancient|greece|rome|empire|history|war|peace|law|rights)\b/i.test(
+      line
+    )
+  ) {
+    return true;
+  }
+
+  // All-caps student name rosters (4+ uppercase words without academic/structural keywords)
+  const words = line.split(/\s+/);
+  if (
+    words.length >= 4 &&
+    words.every((w) => /^[A-Z'-]{2,15}$/.test(w)) &&
+    !/\b(?:INTRODUCTION|ABSTRACT|METHODS|MATERIALS|RESULTS|DISCUSSION|CONCLUSION|SUMMARY|CHAPTER|SECTION|PART|MODULE|THEORY|SYSTEM|MODEL|ANALYSIS|DESIGN|ALGORITHM|DATABASE|NETWORK|PROGRESSION|CONSIDERATIONS|ARCHITECTURE|OVERVIEW|PRINCIPLES|CONCEPTS|COMPETITIVE|EXCLUSION|ECOLOGY|BIOLOGY|PHYSICS|CHEMISTRY|MATHEMATICS|HISTORY|BIBLE|GOD|JESUS|TUTORING|LEARNING|GROUNDING|ADAPTIVE)\b/.test(
+      line
+    )
+  ) {
+    return true;
+  }
+
+  // Exact match to materialTitle when used as a repeated running header
+  if (materialTitle) {
+    const normLine = line.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const normTitle = materialTitle.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (normLine === normTitle && /\?$/.test(line)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Cleans a candidate heading string by removing markdown markers, XML entities,
+ * trailing page numbers, author bylines, index numbers, and course/paper suffixes.
+ */
+export function cleanExtractedHeading(rawHeading: string, materialTitle?: string): string {
+  if (!rawHeading) return '';
+  let cleaned = decodeXmlEntities(rawHeading)
+    .replace(/\b([A-Z])(?:\s+([A-Z])){2,}\b/g, (m) => m.replace(/\s+/g, ''))
+    .replace(/\b([A-Za-z])(?:\s+([a-z])){2,}\b/g, (m) => m.replace(/\s+/g, ''))
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[•*-]\s+/, '')
+    .replace(/^(?:slide|page|section|chunk)\s*\d+\s*[:\-–—]\s*/i, '')
+    .replace(/^(?:\d+(?:\.\d+)*\.?\s+)/, '')
+    .trim();
+
+  // Strip embedded author/byline/index suffixes (e.g. " - By Mukasa David (22/U/14892/PS)")
+  cleaned = cleaned
+    .replace(
+      /\s*(?:[-–—|]|\b)(?:by|author|authors|prepared\s+by|submitted\s+by|written\s+by|student|index\s*(?:no|number|#)?|reg(?:istration)?\s*(?:no|number|#)?)\s*[:\-–—]?\s+[A-Z0-9].*$/i,
+      ''
+    )
+    .replace(/\b\d{2,4}\/[A-Z0-9]{1,6}\/\d{2,}[A-Z0-9/]*\b/gi, '')
+    .replace(/\s+[A-Za-z]+\s+research\s+paper\s+\d{4}.*$/i, '')
+    .trim();
+
+  // If the heading starts with the document title followed by a person byline (e.g., "Competitive Exclusion Luaa Leron & Golden Prince...")
+  if (materialTitle && materialTitle.trim().length >= 4) {
+    const cleanMatTitle = materialTitle.replace(/[_-]/g, ' ').trim();
+    const escapedTitle = cleanMatTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const prefixRegex = new RegExp(`^(${escapedTitle})\\s+[A-Z][a-z]+\\s+[A-Z][a-z]+.*$`, 'i');
+    const prefixMatch = cleaned.match(prefixRegex);
+    if (prefixMatch && prefixMatch[1]) {
+      cleaned = prefixMatch[1].trim();
+    }
+  }
+
+  // Strip trailing punctuation
+  cleaned = cleaned.replace(/[:\-–—,;]+$/, '').trim();
+
+  // Strip trailing standalone page numbers (e.g. "Divine Humans in Ancient Greece and Rome 15")
+  if (
+    !/^(?:chapter|part|section|module|unit|track|lecture|stage|step|phase|level|rule)\s+\d+$/i.test(
+      cleaned
+    )
+  ) {
+    cleaned = cleaned.replace(/\s+\d{1,4}$/, '').trim();
+  }
+
+  // Normalize ALL-CAPS headings longer than 5 chars into clean Title Case (preserving short acronyms like PDF, AI, SQL, IRT)
+  if (cleaned.length > 5 && cleaned === cleaned.toUpperCase() && /[A-Z]{4,}/.test(cleaned)) {
+    const minorWords = new Set(['a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']);
+    cleaned = cleaned
+      .toLowerCase()
+      .split(/\s+/)
+      .map((w, idx) => {
+        if (/^(?:ai|ui|ux|api|sql|pdf|irt|llm|rag|nlp|cpu|gpu|ram|rom|io|ii|iii|iv|vi|vii|viii|ix|xi|xii)$/i.test(w)) {
+          return w.toUpperCase();
+        }
+        if (idx > 0 && minorWords.has(w)) return w;
+        return w.charAt(0).toUpperCase() + w.slice(1);
+      })
+      .join(' ');
+  }
+
+  return cleaned;
+}
+
+/**
+ * Validates whether a candidate string is a genuine, well-formed academic topic heading
+ * (rejecting author names, index numbers, frontmatter, conversational clauses, and fragments).
+ */
+export function isValidTopicHeading(heading?: string, materialTitle?: string): boolean {
+  if (!heading) return false;
+  const cleaned = cleanExtractedHeading(heading, materialTitle);
+  if (!cleaned || cleaned.length < 4 || cleaned.length > 75) return false;
+  if (isGenericSectionHeading(cleaned)) return false;
+  if (isFrontmatterOrBackmatterHeading(cleaned)) return false;
+  if (isMetadataOrNoiseLine(cleaned, materialTitle)) return false;
+
+  // Must contain at least one 3+ letter word and start with an uppercase letter or digit
+  if (!/[A-Za-z]{3,}/.test(cleaned)) return false;
+  if (!/^[A-Z0-9]/.test(cleaned)) return false;
+
+  // Reject raw XML entity remnants or unbalanced parentheses/quotes
+  if (/&(?:amp|lt|gt|quot|apos)\b/i.test(cleaned)) return false;
+  const openParens = (cleaned.match(/\(/g) || []).length;
+  const closeParens = (cleaned.match(/\)/g) || []).length;
+  if (openParens !== closeParens) return false;
+  const doubleQuotes = (cleaned.match(/"/g) || []).length;
+  if (doubleQuotes % 2 !== 0) return false;
+
+  // Reject standalone chapter/section labels without a descriptive title (e.g. "CHAPTER 1")
+  if (/^(?:chapter|part|section|unit|module|question|problem|exercise|figure|table|appendix)\s*[0-9IVX]*$/i.test(cleaned)) {
+    return false;
+  }
+
+  // Reject conversational, pronominal, transitional, or mid-sentence fragment starts
+  if (
+    /^(?:overall|compared\s+with|compared\s+to|there\s+(?:is|are|was|were)|possible\s+that|from\s+(?:a|an|the|this|that|these|those)|in\s+this\s+(?:book|chapter|paper|section|study|course|lecture)|we\s+(?:start|will|have|can|see|now|need|must|consider|examine|discuss|use|define|assume|note|show|find)|if\s+(?:you|we|they|it|the|a|an)|when\s+(?:you|we|they|it|a|an)|you\s+(?:can|will|should|may|must|need|have|are)|it\s+(?:is|was|can|should|may|will|has|appears|seems)|this\s+(?:is|was|means|shows|suggests|indicates|requires|allows)|these\s+(?:are|were|results|findings)|however|furthermore|moreover|therefore|thus|hence|consequently|additionally|nevertheless|nonetheless|meanwhile|subsequently|finally|for\s+(?:example|instance)|as\s+(?:a\s+result|shown|seen|discussed|mentioned|noted)|according\s+to|based\s+on|in\s+(?:addition|contrast|other\s+words|particular|general|fact)|on\s+the\s+other\s+hand|although|because|since|while|whereas|unless|until|after|before|during|between|among|within|without|through|throughout|despite|towards?|upon|was\s+|were\s+|had\s+|has\s+|have\s+|did\s+|does\s+|do\s+|is\s+|are\s+|can\s+|could\s+|would\s+|should\s+|will\s+|may\s+|might\s+|must\s+|that\s+|which\s+|who\s+|whom\s+|whose\s+|where\s+|when\s+|why\s+|how\s+|what\s+|whether\s+|each\s+of|some\s+of|many\s+of|most\s+of|one\s+of|both\s+of|figure\s+\d|table\s+\d|fig\.\s*\d|eq\.\s*\d|equation\s+\d|produced\s+|created\s+|developed\s+|established\s+|located\s+|found\s+|given\s+|taken\s+|made\s+|used\s+|called\s+|known\s+)/i.test(
+      cleaned
+    )
+  ) {
+    return false;
+  }
+
+  const words = cleaned.split(/\s+/);
+  if (words.length > 11) return false;
+
+  // Reject headings ending with dangling prepositions, conjunctions, pronouns, or auxiliary verbs
+  const lastWord = words[words.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!lastWord || TRAILING_NOISE_WORDS.has(lastWord)) {
+    return false;
+  }
+
+  // Reject if it contains conjugated past-tense narrative verbs typical of prose sentences ("was executed", "were observed")
+  if (/\b(?:was|were|had\s+been)\s+[a-z]+ed\b/i.test(cleaned)) {
+    return false;
+  }
+
+  // Require Title-Case capitalization across significant words to reject mid-sentence wrapped prose lines
+  const minorWords = new Set([
+    'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of',
+    'with', 'by', 'as', 'into', 'from', 'vs', 'via', 'per', 'de', 'la', 'et'
+  ]);
+  const significantWords = words.filter((w, idx) => {
+    const bare = w.replace(/[^A-Za-z0-9]/g, '');
+    if (!bare) return false;
+    if (idx === 0) return true;
+    return !minorWords.has(bare.toLowerCase());
+  });
+  if (significantWords.length >= 2) {
+    const capCount = significantWords.filter((w) => {
+      const bare = w.replace(/^[^A-Za-z0-9]+/, '');
+      return /^[A-Z0-9]/.test(bare);
+    }).length;
+    if (capCount / significantWords.length < 0.65) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Truncates lines at an explicit standalone backmatter section header
+ * (e.g., References, Bibliography, Works Cited, Literature Cited)
+ * so trailing citation lists at the end of a page/chunk are ignored.
+ */
+function trimAtBackmatterSection(lines: string[]): string[] {
+  const result: string[] = [];
+  for (const line of lines) {
+    if (
+      /^(?:references|bibliography|works\s+cited|literature\s+cited|acknowledg(?:e)?ments?)$/i.test(
+        line.replace(/[:\-–—.]+$/, '').trim()
+      )
+    ) {
+      break;
+    }
+    result.push(line);
+  }
+  return result;
+}
+
+/**
+ * Detects whether a chunk is predominantly non-instructional (e.g., frontmatter,
+ * table of contents, dedication, acknowledgments, bibliography/references, or student rosters)
+ * so it can be excluded from topic chips and quiz generation.
+ */
+export function isNonInstructionalChunk(chunk: SourceChunk): boolean {
+  if (!chunk || !chunk.extractedText) return true;
+  if (isFrontmatterOrBackmatterHeading(chunk.sectionHeading)) return true;
+
+  const lines = chunk.extractedText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !/^(?:page\s*\d+|\d+)$/i.test(l));
+
+  if (lines.length === 0) return true;
+
+  // Check if the first meaningful line is an explicit frontmatter/backmatter header
+  const firstNonRunning = lines.find((l) => !/^\d+\s+[A-Z]/.test(l) && !/[A-Z]\s+\d+$/.test(l));
+  if (firstNonRunning && isFrontmatterOrBackmatterHeading(firstNonRunning)) {
+    return true;
+  }
+
+  // Table of contents dot-leader or page-number listing detection
+  const sampleLines = lines.slice(0, 14);
+  const tocLines = sampleLines.filter(
+    (l) => /(?:\.{3,}|\s+\d{1,3})$/.test(l) || /^(?:chapter|part|section)\s+\d+/i.test(l)
+  );
+  if (sampleLines.length >= 4 && tocLines.length / sampleLines.length >= 0.6) {
+    return true;
+  }
+
+  // Filter out metadata/noise lines and anything after a backmatter header (e.g. References)
+  const beforeBackmatter = trimAtBackmatterSection(lines);
+  const instructionalLines = beforeBackmatter.filter(
+    (l) => !isMetadataOrNoiseLine(l, chunk.materialTitle) && !isFrontmatterOrBackmatterHeading(l)
+  );
+
+  // If no substantive instructional text remains after removing metadata/references, the chunk is non-instructional
+  const instructionalChars = instructionalLines.join(' ').trim().length;
+  if (instructionalLines.length === 0 || instructionalChars < 45) {
+    return true;
+  }
+
+  return false;
+}
 
 /**
  * Extracts a meaningful section/topic heading from raw passage text when an explicit
@@ -209,121 +593,149 @@ const TRAILING_NOISE_WORDS = new Set([
  */
 export function extractMeaningfulSectionHeading(
   rawText: string,
-  fallbackLabel = 'Document Section'
+  fallbackLabel = 'Document Section',
+  materialTitle?: string
 ): string {
   if (!rawText || !rawText.trim()) return fallbackLabel;
 
-  // Strip leading page numbers or running markers like "Page 1 of 4"
-  const text = rawText
+  const text = decodeXmlEntities(rawText)
+    .replace(/\b([A-Z])(?:\s+([A-Z])){2,}\b/g, (m) => m.replace(/\s+/g, ''))
     .replace(/^\s*(?:page\s*\d+(?:\s*of\s*\d+)?|\d+\s*\/\s*\d+)\s*/i, '')
     .trim();
 
   if (!text) return fallbackLabel;
 
-  // 1. Check multi-line structure for a standalone title line at the top
-  const lines = text
+  const rawLines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !/^(?:page\s*\d+|\d+)$/i.test(l));
 
-  if (lines.length > 0) {
-    const firstLine = lines[0]
-      .replace(/^#{1,6}\s+/, '')
-      .replace(/^[•*-]\s+/, '')
-      .replace(/[:\-–—]+$/, '')
-      .trim();
+  // If the first non-running line is frontmatter/backmatter, return it so isNonInstructionalChunk can flag it cleanly
+  const nonRunningTop = rawLines.filter(
+    (l) =>
+      !/^\d{1,4}\s+[A-Z\s?'":,-]{4,}$/.test(l) &&
+      !/^[A-Z][A-Za-z0-9\s?'":,&-]{3,}\s+\d{1,4}$/.test(l)
+  );
+  if (nonRunningTop.length > 0 && isFrontmatterOrBackmatterHeading(nonRunningTop[0])) {
+    return cleanExtractedHeading(nonRunningTop[0], materialTitle) || fallbackLabel;
+  }
 
-    const wordCount = firstLine.split(/\s+/).length;
-    if (
-      firstLine.length >= 4 &&
-      firstLine.length <= 72 &&
-      wordCount >= 1 &&
-      wordCount <= 11 &&
-      /[A-Za-z]{3,}/.test(firstLine) &&
-      !/[.;,?]$/.test(firstLine) &&
-      !isGenericSectionHeading(firstLine)
-    ) {
-      return firstLine;
+  // Filter out metadata, author names, index numbers, university banners, running headers, and trailing References sections
+  const cleanLines = trimAtBackmatterSection(rawLines).filter(
+    (l) => !isMetadataOrNoiseLine(l, materialTitle)
+  );
+
+  // 1. Check top lines for Chapter/Track/Module combinations or standalone structural headings
+  for (let i = 0; i < Math.min(cleanLines.length, 5); i++) {
+    const line = cleanLines[i];
+
+    // If line is "CHAPTER 1" / "PART II" / "MODULE 3", combine with the next line if it's a valid title
+    if (/^(?:chapter|part|section|module|unit)\s+[0-9IVX]+$/i.test(line) && cleanLines[i + 1]) {
+      const nextCandidate = cleanExtractedHeading(cleanLines[i + 1], materialTitle);
+      if (isValidTopicHeading(nextCandidate, materialTitle)) {
+        const prefix = line.charAt(0).toUpperCase() + line.slice(1).toLowerCase();
+        return `${prefix}: ${nextCandidate}`;
+      }
+    }
+
+    // Check if the line itself is a standalone title/heading (and not a wrapped mid-sentence line)
+    const nextRawLine = cleanLines[i + 1] || '';
+    const nextIsLowerContinuation =
+      /^[a-z]/.test(nextRawLine) && !/^[a-z][.)]\s+[A-Z]/.test(nextRawLine);
+    const continuesMidSentence = !/[.!?:]$/.test(line) && nextIsLowerContinuation;
+
+    if (!continuesMidSentence) {
+      const candidate = cleanExtractedHeading(line, materialTitle);
+      const wordCount = candidate.split(/\s+/).length;
+      if (
+        wordCount >= 1 &&
+        wordCount <= 10 &&
+        !/[.;,?]$/.test(line.replace(/[:\-–—]+$/, '').trim()) &&
+        isValidTopicHeading(candidate, materialTitle)
+      ) {
+        return candidate;
+      }
+    }
+
+    // Check for numbered/bulleted concept label with colon followed by prose (e.g., "1. Learner Model: Maintain a dynamic...")
+    const colonLabelMatch = line.match(
+      /^(?:(?:\d+(?:\.\d+)*\.?|[A-Z]\.|[•*\-\u25cf])\s+)?([A-Z][A-Za-z0-9\s,&/()'-]{3,52}?)\s*[:\-–—]\s+\S/
+    );
+    if (colonLabelMatch && colonLabelMatch[1]) {
+      const labelCandidate = cleanExtractedHeading(colonLabelMatch[1], materialTitle);
+      if (isValidTopicHeading(labelCandidate, materialTitle)) {
+        return labelCandidate;
+      }
     }
   }
 
-  const openingWindow = text.slice(0, 360).replace(/\s+/g, ' ').trim();
+  // 2. Scan all lines in the chunk for an embedded structural subheading (e.g. when a PDF page starts mid-sentence from the previous page)
+  for (let i = 1; i < cleanLines.length; i++) {
+    const line = cleanLines[i];
 
-  // 2. Check for explicit Track / Module / Chapter / Unit / Part / Schedule designators
-  const structuralMatch = openingWindow.match(
-    /\b((?:Track|Module|Chapter|Unit|Topic|Lecture|Schedule|Part)\s+[A-Z0-9]+(?:\s*[:\-–—]\s*[A-Z0-9][A-Za-z0-9\s,&/()'-]{2,45})?)/i
+    // Standard academic section headers or colon-terminated subheadings
+    if (
+      /^(?:abstract|introduction|background|materials\s+and\s+methods|methodology|methods|experimental\s+design|results|results\s+and\s+discussion|discussion|conclusion|conclusions|summary|system\s+architecture|technical\s+considerations|key\s+concepts|core\s+principles|theoretical\s+framework|literature\s+review)\s*:?$/i.test(
+        line
+      )
+    ) {
+      const candidate = cleanExtractedHeading(line, materialTitle);
+      if (isValidTopicHeading(candidate, materialTitle)) {
+        return candidate;
+      }
+    }
+
+    // Explicit Track / Module / Chapter / numbered heading mid-page
+    if (
+      /^(?:(?:track|module|chapter|unit|topic|lecture)\s+[A-Z0-9]+|\d+(?:\.\d+)*\.?\s+[A-Z])/i.test(
+        line
+      )
+    ) {
+      const colonPart = line.split(/\s*[:\-–—]\s+/)[0];
+      const candidate = cleanExtractedHeading(
+        line.length <= 68 && !/[.;]$/.test(line) ? line : colonPart,
+        materialTitle
+      );
+      if (isValidTopicHeading(candidate, materialTitle)) {
+        return candidate;
+      }
+    }
+
+    // Short standalone heading ending with colon (e.g., "Technical Considerations:")
+    if (/^[A-Z][A-Za-z0-9\s,&/()'-]{4,52}:$/.test(line)) {
+      const candidate = cleanExtractedHeading(line, materialTitle);
+      if (isValidTopicHeading(candidate, materialTitle)) {
+        return candidate;
+      }
+    }
+  }
+
+  // 3. Check for explicit Track / Module / Chapter / Unit / Concept definitions in the clean text window
+  const cleanWindow = cleanLines.slice(0, 8).join(' ').slice(0, 420).replace(/\s+/g, ' ').trim();
+
+  const structuralMatch = cleanWindow.match(
+    /\b((?:Track|Module|Chapter|Unit|Topic|Lecture)\s+[A-Z0-9]+(?:\s*[:\-–—]\s*[A-Z0-9][A-Za-z0-9\s,&/()'-]{2,45})?)/i
   );
   if (structuralMatch && structuralMatch[1]) {
-    const candidate = structuralMatch[1].replace(/[:\-–—]+$/, '').trim();
-    if (candidate.length >= 5 && candidate.length <= 68 && !isGenericSectionHeading(candidate)) {
+    const candidate = cleanExtractedHeading(structuralMatch[1], materialTitle);
+    if (isValidTopicHeading(candidate, materialTitle)) {
       return candidate;
     }
   }
 
-  // 3. Check for numbered heading or concept definition at start of text
-  const conceptMatch = openingWindow.match(
-    /^(?:(?:\d+(?:\.\d+)*\.?|[IVX]+\.)\s+)?([A-Z][A-Za-z0-9\s,&/()'-]{3,54}?)(?:\s*[:\-–—]\s+|\s+\b(?:is\s+(?:a|an|the|defined\s+as)|are\s+(?:defined\s+as|levied|used)|refers\s+to|requires|establishes|governs|represents|consists\s+of)\b)/
-  );
-  if (conceptMatch && conceptMatch[1]) {
-    const candidate = conceptMatch[1].trim();
-    if (
-      candidate.length >= 4 &&
-      candidate.length <= 64 &&
-      candidate.split(/\s+/).length <= 9 &&
-      !isGenericSectionHeading(candidate)
-    ) {
-      return candidate;
+  // 4. Check for a concept definition sentence ("<Concept> is a/an/the/defined as/where/refers to...")
+  const sentences = cleanWindow.split(/(?<=[.!?])\s+/);
+  for (const sent of sentences.slice(0, 3)) {
+    const cleanSent = sent.replace(/^(?:\d+(?:\.\d+)*\.?|[•*\-\u25cf])\s+/, '').trim();
+    const conceptMatch = cleanSent.match(
+      /^([A-Z][A-Za-z0-9\s,&/()'-]{3,48}?)\s+\b(?:is\s+(?:a|an|the|defined\s+as|where|characterized\s+by)|are\s+(?:defined\s+as|characterized\s+by)|refers\s+to|describes|governs|represents|consists\s+of|occurs\s+when)\b/
+    );
+    if (conceptMatch && conceptMatch[1]) {
+      const candidate = cleanExtractedHeading(conceptMatch[1], materialTitle);
+      if (isValidTopicHeading(candidate, materialTitle)) {
+        return candidate;
+      }
     }
-  }
-
-  // 4. Derive from the opening sentence's subject clause or key words
-  const firstSentence = openingWindow
-    .split(/(?<=[.!?])\s+|\s+[•|]\s+/)[0]
-    .replace(/^(?:\d+(?:\.\d+)*\.?|[•*-])\s+/, '')
-    .trim();
-
-  const verbSplit = firstSentence.match(
-    /^([A-Z][A-Za-z0-9\s,&/()'-]{4,52}?)\s+\b(?:is|are|was|were|must|should|will|can|may|provides|defines|describes|explains|requires|includes|consists|involves|introduces|applies|allows)\b/
-  );
-  if (verbSplit && verbSplit[1]) {
-    const subjectClause = verbSplit[1].replace(/[,:;]+$/, '').trim();
-    const subjectWords = subjectClause.split(/\s+/);
-    if (
-      subjectClause.length >= 5 &&
-      subjectWords.length >= 2 &&
-      subjectWords.length <= 8 &&
-      !isGenericSectionHeading(subjectClause)
-    ) {
-      return subjectClause;
-    }
-  }
-
-  // 5. Fallback: take the first 5-7 meaningful words from the opening text
-  const rawWords = firstSentence
-    .replace(/[^A-Za-z0-9\s&/()-]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length > 0);
-
-  // Strip leading articles/fillers
-  while (
-    rawWords.length > 3 &&
-    /^(?:the|a|an|in|on|this|these|note|notes|chapter|section|page|\d+)$/i.test(rawWords[0])
-  ) {
-    rawWords.shift();
-  }
-
-  const sliceWords = rawWords.slice(0, 6);
-  while (
-    sliceWords.length > 2 &&
-    TRAILING_NOISE_WORDS.has(sliceWords[sliceWords.length - 1].toLowerCase())
-  ) {
-    sliceWords.pop();
-  }
-
-  const constructed = sliceWords.join(' ').trim();
-  if (constructed.length >= 4 && /[A-Za-z]{3,}/.test(constructed)) {
-    const capitalized = constructed.charAt(0).toUpperCase() + constructed.slice(1);
-    return capitalized.length > 64 ? capitalized.slice(0, 61).trim() + '...' : capitalized;
   }
 
   return fallbackLabel;
@@ -331,25 +743,266 @@ export function extractMeaningfulSectionHeading(
 
 /**
  * Derives a clean, human-readable study topic name from a SourceChunk.
- * Preserves real document headings when present and extracts meaningful subject
- * titles when a chunk only has a positional label (like "Page 1" or "Chunk 1").
+ * Preserves real document headings when valid and re-derives from passage text
+ * if a stored heading is generic, frontmatter, or metadata/author/index noise.
  */
 export function deriveTopicNameFromChunk(chunk: SourceChunk, index = 0): string {
   const rawHeading = (chunk.sectionHeading || '').trim();
-
-  // Strip positional prefixes like "Slide 2: " or "Page 3: " or "Section 1: "
   const strippedPrefix = rawHeading
     .replace(/^(?:slide|page|section|chunk|part)\s*\d+\s*[:\-–—]\s*/i, '')
     .trim();
 
-  if (strippedPrefix && !isGenericSectionHeading(strippedPrefix)) {
-    return strippedPrefix.replace(/^(?:\d+(?:\.\d+)*\.?\s+)/, '').trim() || strippedPrefix;
+  const cleanedExisting = cleanExtractedHeading(strippedPrefix, chunk.materialTitle);
+  if (cleanedExisting && isValidTopicHeading(cleanedExisting, chunk.materialTitle)) {
+    return cleanedExisting;
   }
 
-  return extractMeaningfulSectionHeading(
+  const fallback = chunk.materialTitle
+    ? `${chunk.materialTitle} — Section ${index + 1}`
+    : `Section ${index + 1}`;
+
+  const derived = extractMeaningfulSectionHeading(
     chunk.extractedText,
-    chunk.materialTitle ? `${chunk.materialTitle} — Section ${index + 1}` : `Section ${index + 1}`
+    fallback,
+    chunk.materialTitle
   );
+
+  if (isValidTopicHeading(derived, chunk.materialTitle)) {
+    return derived;
+  }
+
+  return fallback;
+}
+
+/**
+ * Extracts a deduplicated, clean list of organized study topics from a StudyMaterial.
+ * Filters out non-instructional chunks, author names, index numbers, and mid-sentence fragments,
+ * and supplements with numbered sub-concepts when a short document has multiple labeled items on one page.
+ */
+export function extractOrganizedTopicsFromMaterial(
+  material: StudyMaterial,
+  maxTopics = 6
+): string[] {
+  const topics: string[] = [];
+  const seenLower = new Set<string>();
+
+  const addTopic = (candidate?: string) => {
+    if (!candidate) return;
+    const cleaned = cleanExtractedHeading(candidate, material.title);
+    if (!isValidTopicHeading(cleaned, material.title)) return;
+    const lower = cleaned.toLowerCase();
+    if (seenLower.has(lower)) return;
+    seenLower.add(lower);
+    topics.push(cleaned);
+  };
+
+  const chunks = material.chunks || [];
+
+  // Pass 1: Collect primary valid headings from instructional chunks
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    if (isNonInstructionalChunk(chunk)) continue;
+    const derived = deriveTopicNameFromChunk(chunk, i);
+    // Skip generic fallback labels like "DocTitle — Section 2" when collecting topic chips
+    if (!/\s+—\s+Section\s+\d+$/i.test(derived)) {
+      addTopic(derived);
+    }
+    if (topics.length >= maxTopics) return topics;
+  }
+
+  // Pass 2: Scan instructional chunks for numbered headings or colon-headed subtopics (e.g. "2. Knowledge Grounding: ..." or "2. Tuple Relational Calculus")
+  for (const chunk of chunks) {
+    if (isNonInstructionalChunk(chunk)) continue;
+    const rawLines = chunk.extractedText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const lines = trimAtBackmatterSection(rawLines);
+    for (const line of lines) {
+      if (isMetadataOrNoiseLine(line, material.title)) continue;
+      // Match "2. Concept Name: explanation..."
+      const subMatch = line.match(
+        /^(?:(?:\d+(?:\.\d+)*\.?|[•*\-\u25cf])\s+)([A-Z][A-Za-z0-9\s,&/()'-]{3,52}?)(?:\s*\([^)]*\))?\s*[:\-–—]\s+\S/
+      );
+      if (subMatch && subMatch[1]) {
+        addTopic(subMatch[1]);
+        if (topics.length >= maxTopics) return topics;
+        continue;
+      }
+      // Match standalone numbered section headings "2. Tuple Relational Calculus" or "1. Multimodal Knowledge Base:"
+      const standaloneNumMatch = line.match(
+        /^\d+(?:\.\d+)*\.?\s+([A-Z][A-Za-z0-9\s,&/()'-]{3,58}?)\s*:?$/
+      );
+      if (standaloneNumMatch && standaloneNumMatch[1] && !/[.;?]$/.test(line)) {
+        addTopic(standaloneNumMatch[1]);
+        if (topics.length >= maxTopics) return topics;
+      }
+    }
+  }
+
+  // Pass 3: Fallback to clean material title if no subtopics were found
+  if (topics.length === 0 && material.title) {
+    const cleanTitle = cleanExtractedHeading(material.title);
+    if (cleanTitle.length >= 3) {
+      topics.push(cleanTitle);
+    }
+  }
+
+  return topics;
+}
+
+/**
+ * Extracts complete, self-contained factual statements from a SourceChunk for quiz generation.
+ * Unwraps hard PDF line breaks before splitting into sentences and filters out metadata,
+ * author names, index numbers, headers, questions, and broken sentence fragments.
+ */
+export function extractStudyStatementsFromChunk(chunk: SourceChunk): string[] {
+  if (!chunk || !chunk.extractedText || isNonInstructionalChunk(chunk)) {
+    return [];
+  }
+
+  const rawLines = trimAtBackmatterSection(
+    decodeXmlEntities(chunk.extractedText)
+      .replace(/\b([A-Z])(?:\s+([A-Z])){2,}\b/g, (m) => m.replace(/\s+/g, ''))
+      .replace(/\b([A-Za-z])(?:\s+([a-z])){2,}\b/g, (m) => m.replace(/\s+/g, ''))
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+  );
+
+  // Filter out metadata, running headers, frontmatter titles, and standalone short section headings
+  const proseLines: string[] = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    if (isMetadataOrNoiseLine(line, chunk.materialTitle)) continue;
+    if (isFrontmatterOrBackmatterHeading(line)) continue;
+
+    // Skip standalone title/heading lines that don't end in sentence punctuation
+    const cleanedAsHeading = cleanExtractedHeading(line, chunk.materialTitle);
+    if (
+      chunk.sectionHeading &&
+      cleanedAsHeading.toLowerCase() === chunk.sectionHeading.toLowerCase() &&
+      !/[.!?]$/.test(line)
+    ) {
+      continue;
+    }
+    if (
+      chunk.materialTitle &&
+      cleanedAsHeading.toLowerCase() === chunk.materialTitle.toLowerCase() &&
+      !/[.!?]$/.test(line)
+    ) {
+      continue;
+    }
+    const prevProseLine = proseLines[proseLines.length - 1] || '';
+    const prevEndedSentence = !prevProseLine || /[.!?]$/.test(prevProseLine);
+    const nextLine = rawLines[i + 1] || '';
+    const nextIsLowercaseProse =
+      /^[a-z]/.test(nextLine) && !/^[a-z][.)]\s+[A-Z]/.test(nextLine);
+    const isStandaloneColonHeader =
+      /^(?:\d+(?:\.\d+)*\.?\s+)?[A-Z][A-Za-z0-9\s,&/()'-]{2,52}:$/.test(line);
+    if (
+      isStandaloneColonHeader ||
+      (prevEndedSentence &&
+        /^[A-Z0-9]/.test(line) &&
+        !/^[a-zA-Z][.)]\s+/.test(line) &&
+        line.length < 55 &&
+        !/[.!?]$/.test(line) &&
+        !nextIsLowercaseProse &&
+        isValidTopicHeading(line, chunk.materialTitle))
+    ) {
+      continue;
+    }
+
+    proseLines.push(line);
+  }
+
+  if (proseLines.length === 0) return [];
+
+  // Unwrap PDF line breaks into logical paragraphs
+  const paragraphs: string[] = [];
+  let currentPara = '';
+
+  const pushPara = (p: string) => {
+    const trimmed = p.trim();
+    if (!trimmed) return;
+    paragraphs.push(/[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`);
+  };
+
+  for (const line of proseLines) {
+    const isNewListItem =
+      /^(?:(?:\d+(?:\.\d+)*|[a-zA-Z])[.)]|[•*\-\u25cf\u25cb\u25aa\u25b8])\s+[A-Z]/.test(line);
+    if (isNewListItem && currentPara) {
+      pushPara(currentPara);
+      currentPara = line;
+    } else if (!currentPara) {
+      currentPara = line;
+    } else if (/[a-z]-\s*$/i.test(currentPara) && /^[a-z]/.test(line)) {
+      // Rejoin hyphenated word split across lines
+      currentPara = currentPara.replace(/-\s*$/, '') + line;
+    } else {
+      currentPara = `${currentPara} ${line}`;
+    }
+  }
+  if (currentPara.trim()) {
+    pushPara(currentPara);
+  }
+
+  // Split unwrapped paragraphs into candidate sentences
+  const candidateSentences: string[] = [];
+  for (const para of paragraphs) {
+    const splitSents = para.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/);
+    for (const s of splitSents) {
+      candidateSentences.push(s.trim());
+    }
+  }
+
+  const validStatements: string[] = [];
+  const seenLower = new Set<string>();
+
+  for (const rawSent of candidateSentences) {
+    const sent = rawSent
+      .replace(/^(?:(?:\d+(?:\.\d+)*|[a-zA-Z])[.)]|[•*\-\u25cf\u25cb\u25aa\u25b8])\s+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (sent.length < 45 || sent.length > 260) continue;
+    if (!/^[A-Z]/.test(sent)) continue;
+    if (!/[.!]$/.test(sent)) continue;
+
+    // Must have balanced parentheses and quotes
+    const openParens = (sent.match(/\(/g) || []).length;
+    const closeParens = (sent.match(/\)/g) || []).length;
+    if (openParens !== closeParens) continue;
+
+    const words = sent.split(/\s+/);
+    if (words.length < 7) continue;
+
+    // Reject questions, instructions, or first-person meta statements
+    if (/\?$/.test(sent)) continue;
+    if (
+      /^(?:what|why|how|when|where|who|which|explain|describe|discuss|calculate|determine|find|solve|in\s+this\s+(?:book|chapter|paper|section|study)|we\s+(?:start|will|shall|now)|i\s+(?:will|have|would|argue)|figure\s+\d|table\s+\d|see\s+(?:figure|table|page|section|chapter))\b/i.test(
+        sent
+      )
+    ) {
+      continue;
+    }
+
+    if (isMetadataOrNoiseLine(sent, chunk.materialTitle)) continue;
+
+    // Must contain an informational verb/predicate
+    if (
+      !/\b(?:is|are|was|were|has|have|had|can|could|will|would|must|should|may|provides|requires|maintains|adapts|uses|allows|enables|defines|describes|consists|involves|occurs|produces|increases|decreases|affects|demonstrates|indicates|shows|means|refers|helps|supports|tracks|builds|generates|evaluates|combines|prevents|leads|results|competes|coexist|divides|establishes|represents|governs)\b/i.test(
+        sent
+      )
+    ) {
+      continue;
+    }
+
+    const lower = sent.toLowerCase();
+    if (!seenLower.has(lower)) {
+      seenLower.add(lower);
+      validStatements.push(sent);
+    }
+  }
+
+  return validStatements;
 }
 
 /**
@@ -426,9 +1079,20 @@ export async function extractPdf(
       };
     }
 
-    // Generate semantic chunks strictly from real pages
+    // Generate semantic chunks strictly from real pages, carrying active section heading across continuation pages
     const chunks: SourceChunk[] = [];
     let chunkIdx = 0;
+    let lastActiveHeading = '';
+
+    const resolvePageHeading = (chunkText: string, pageNumber: number): string => {
+      const fallback = lastActiveHeading || `Page ${pageNumber}`;
+      const extracted = extractMeaningfulSectionHeading(chunkText, fallback, materialTitle);
+      if (isValidTopicHeading(extracted, materialTitle)) {
+        lastActiveHeading = extracted;
+        return extracted;
+      }
+      return extracted;
+    };
 
     for (const page of pages) {
       if (!page.text || page.text.trim().length === 0) continue;
@@ -436,10 +1100,7 @@ export async function extractPdf(
       // If page is reasonably sized (< 1100 chars), keep it as a coherent page chunk
       if (page.text.length <= 1100) {
         chunkIdx++;
-        const derivedHeading = extractMeaningfulSectionHeading(
-          page.text,
-          `Page ${page.pageNumber}`
-        );
+        const derivedHeading = resolvePageHeading(page.text, page.pageNumber);
         chunks.push({
           id: `chunk-${materialId}-p${page.pageNumber}-${chunkIdx}`,
           materialId,
@@ -464,10 +1125,7 @@ export async function extractPdf(
           if (currentCombined.length + para.length > 900 && currentCombined.length > 300) {
             chunkIdx++;
             const chunkText = currentCombined.trim();
-            const derivedHeading = extractMeaningfulSectionHeading(
-              chunkText,
-              `Page ${page.pageNumber}`
-            );
+            const derivedHeading = resolvePageHeading(chunkText, page.pageNumber);
             chunks.push({
               id: `chunk-${materialId}-p${page.pageNumber}-${chunkIdx}`,
               materialId,
@@ -492,10 +1150,7 @@ export async function extractPdf(
         if (currentCombined.trim().length > 0) {
           chunkIdx++;
           const chunkText = currentCombined.trim();
-          const derivedHeading = extractMeaningfulSectionHeading(
-            chunkText,
-            `Page ${page.pageNumber}`
-          );
+          const derivedHeading = resolvePageHeading(chunkText, page.pageNumber);
           chunks.push({
             id: `chunk-${materialId}-p${page.pageNumber}-${chunkIdx}`,
             materialId,
@@ -578,7 +1233,7 @@ export async function extractDocx(
       };
     }
 
-    // Try HTML conversion to discover structured headings
+    // Try HTML conversion to discover structured headings while preserving line breaks
     let sections: ExtractedSection[] = [];
     try {
       const htmlResult = await mammoth.convertToHtml(mammothInput);
@@ -591,18 +1246,32 @@ export async function extractDocx(
       for (const part of parts) {
         if (!part.trim()) continue;
 
-        // Extract heading text if exists
+        // Extract heading text if exists, preserving internal line breaks to filter out author bylines
         const headingMatch = part.match(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i);
         let heading = '';
         if (headingMatch) {
-          heading = cleanText(headingMatch[1].replace(/<[^>]+>/g, ''));
+          const rawHeadingLines = headingMatch[1]
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(?:p|div|span)>/gi, '\n')
+            .replace(/<[^>]+>/g, ' ')
+            .split(/\r?\n/)
+            .map((l) => cleanText(l))
+            .filter((l) => l.length > 0 && !isMetadataOrNoiseLine(l, materialTitle));
+
+          const candidateHeading = cleanExtractedHeading(rawHeadingLines[0] || '', materialTitle);
+          if (isValidTopicHeading(candidateHeading, materialTitle)) {
+            heading = candidateHeading;
+          }
         }
 
-        // Strip HTML tags for clean text
-        const plainText = cleanText(part.replace(/<[^>]+>/g, ' '));
+        // Convert block HTML tags to newlines before stripping inline tags so paragraphs/bylines don't merge
+        const htmlWithNewlines = part
+          .replace(/<\/(?:p|h[1-6]|li|tr|div|blockquote|section)>/gi, '\n')
+          .replace(/<br\s*\/?>/gi, '\n');
+        const plainText = cleanText(htmlWithNewlines.replace(/<[^>]+>/g, ' '));
         if (plainText.length > 25) {
           const resolvedHeading =
-            heading || extractMeaningfulSectionHeading(plainText, `Section ${secIndex}`);
+            heading || extractMeaningfulSectionHeading(plainText, `Section ${secIndex}`, materialTitle);
           sections.push({
             heading: resolvedHeading,
             text: plainText,
@@ -624,7 +1293,11 @@ export async function extractDocx(
       for (const para of paragraphs) {
         if (buffer.length + para.length > 800 && buffer.length > 250) {
           const chunkText = buffer.trim();
-          const resolvedHeading = extractMeaningfulSectionHeading(chunkText, `Section ${secIndex}`);
+          const resolvedHeading = extractMeaningfulSectionHeading(
+            chunkText,
+            `Section ${secIndex}`,
+            materialTitle
+          );
           sections.push({
             heading: resolvedHeading,
             text: chunkText,
@@ -639,7 +1312,11 @@ export async function extractDocx(
 
       if (buffer.trim().length > 0) {
         const chunkText = buffer.trim();
-        const resolvedHeading = extractMeaningfulSectionHeading(chunkText, `Section ${secIndex}`);
+        const resolvedHeading = extractMeaningfulSectionHeading(
+          chunkText,
+          `Section ${secIndex}`,
+          materialTitle
+        );
         sections.push({
           heading: resolvedHeading,
           text: chunkText,

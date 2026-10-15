@@ -28,6 +28,12 @@ import {
   getDueReviews,
   formatTimeUntilDue,
 } from '../../lib/spacedRepetition.ts';
+import {
+  deriveTopicNameFromChunk,
+  extractStudyStatementsFromChunk,
+  isNonInstructionalChunk,
+  isValidTopicHeading,
+} from '../../lib/documentExtraction.ts';
 
 interface AssessmentsSectionProps {
   questions: QuizQuestion[];
@@ -124,11 +130,22 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
     const generated: QuizQuestion[] = [];
 
     targetMaterials.forEach((mat) => {
-      (mat.chunks || []).forEach((chunk, cIdx) => {
-        let questionPrompt = '';
-        let excerptText = chunk.extractedText.trim();
-        if (excerptText.length > 140) excerptText = excerptText.slice(0, 140) + '...';
+      const instructionalChunks = (mat.chunks || []).filter((c) => !isNonInstructionalChunk(c));
+      instructionalChunks.forEach((chunk, cIdx) => {
+        const derivedHeading = deriveTopicNameFromChunk(chunk, cIdx);
+        const cleanHeading = isValidTopicHeading(derivedHeading, mat.title)
+          ? derivedHeading
+          : mat.title;
+        const statements = extractStudyStatementsFromChunk(chunk);
+        const primaryStatement =
+          statements[0] ||
+          `The ${cleanHeading} section in ${mat.title} establishes the core principles documented in ${chunk.anchorLabel || 'this passage'}.`;
+        const excerptText =
+          primaryStatement.length > 175
+            ? `${primaryStatement.slice(0, 172).trim()}...`
+            : primaryStatement;
 
+        let questionPrompt = '';
         let distractor1 = '';
         let distractor2 = '';
         let distractor3 = '';
@@ -137,34 +154,34 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
           ? `Page ${chunk.pageNumber}`
           : chunk.slideNumber
           ? `Slide ${chunk.slideNumber}`
-          : chunk.anchorLabel || chunk.sectionHeading || 'Document Passage';
+          : chunk.anchorLabel || cleanHeading || 'Document Passage';
 
         if (practiceMethod === 'spaced_review') {
-          questionPrompt = `Spaced Retention Check: Recall the core invariant or principle from "${chunk.sectionHeading}" in "${mat.title}" (${anchorText}):`;
-          distractor1 = `An outdated formulation where the critical constraints of ${chunk.sectionHeading} are omitted.`;
+          questionPrompt = `Spaced Retention Check: Recall the core invariant or principle from "${cleanHeading}" in "${mat.title}" (${anchorText}):`;
+          distractor1 = `An outdated formulation where the critical constraints of ${cleanHeading} are omitted.`;
           distractor2 = `A common misconception that inverts the operation documented in ${anchorText}.`;
           distractor3 = `An external heuristic unsupported by the verified syllabus text of ${mat.title}.`;
         } else if (practiceMethod === 'concept_explanation') {
-          questionPrompt = `Concept Explanation (Feynman Technique): In your own words, which statement best explains the mechanism and significance of "${chunk.sectionHeading}" from "${mat.title}" (${anchorText})?`;
-          distractor1 = `It inverts the primary mechanism of ${chunk.sectionHeading}, assuming opposite preconditions.`;
-          distractor2 = `It treats ${chunk.sectionHeading} as an unverified approximation that disregards course validation rules.`;
+          questionPrompt = `Concept Explanation (Feynman Technique): In your own words, which statement best explains the mechanism and significance of "${cleanHeading}" from "${mat.title}" (${anchorText})?`;
+          distractor1 = `It inverts the primary mechanism of ${cleanHeading}, assuming opposite preconditions.`;
+          distractor2 = `It treats ${cleanHeading} as an unverified approximation that disregards course validation rules.`;
           distractor3 = `A broad external concept not supported by the syllabus text of ${mat.title}.`;
         } else if (practiceMethod === 'active_recall') {
-          questionPrompt = `Active Recall: What is the primary definition or key invariant established in "${chunk.sectionHeading}" (${anchorText} of "${mat.title}")?`;
-          distractor1 = `A conflicting definition that inverts the critical constraints of ${chunk.sectionHeading}.`;
+          questionPrompt = `Active Recall: What is the primary definition or key invariant established in "${cleanHeading}" (${anchorText} of "${mat.title}")?`;
+          distractor1 = `A conflicting definition that inverts the critical constraints of ${cleanHeading}.`;
           distractor2 = `An uncommitted transition that violates the invariants documented in ${anchorText}.`;
           distractor3 = `A secondary hypothesis omitted from the verified text of ${mat.title}.`;
         } else {
           // mixed_practice: alternate between recall and conceptual explanation
           if (cIdx % 2 === 0) {
-            questionPrompt = `Active Recall: What primary invariant is defined in "${chunk.sectionHeading}" (${anchorText} of "${mat.title}")?`;
-            distractor1 = `An alternative formulation where the invariants in ${chunk.sectionHeading} are omitted.`;
+            questionPrompt = `Active Recall: What primary invariant is defined in "${cleanHeading}" (${anchorText} of "${mat.title}")?`;
+            distractor1 = `An alternative formulation where the invariants in ${cleanHeading} are omitted.`;
             distractor2 = `An uncommitted transition that bypasses the validation rules in ${anchorText}.`;
             distractor3 = `A secondary hypothesis unrelated to the core text of ${mat.title}.`;
           } else {
-            questionPrompt = `Concept Explanation: How does "${chunk.sectionHeading}" function within "${mat.title}" (${anchorText})?`;
+            questionPrompt = `Concept Explanation: How does "${cleanHeading}" function within "${mat.title}" (${anchorText})?`;
             distractor1 = `It bypasses safety requirements when operating under normal parameters.`;
-            distractor2 = `It reverses the causal order of operations detailed in section ${chunk.sectionHeading}.`;
+            distractor2 = `It reverses the causal order of operations detailed in section ${cleanHeading}.`;
             distractor3 = `It applies an external heuristic that conflicts with the findings in ${anchorText}.`;
           }
         }
@@ -184,16 +201,16 @@ export const AssessmentsSection: React.FC<AssessmentsSectionProps> = ({
         generated.push({
           id: `q-${chunk.id}-${practiceMethod}`,
           topicId: mat.id,
-          topicName: mat.title,
+          topicName: cleanHeading,
           questionText: questionPrompt,
           options,
           correctOptionIndex: correctIdx,
-          explanation: `Verified directly from ${anchorText} of "${mat.title}": "${chunk.extractedText}"`,
+          explanation: `Verified directly from ${anchorText} of "${mat.title}": "${primaryStatement}"`,
           difficulty: cIdx % 2 === 0 ? 'intermediate' : 'foundational',
           sourceReference: {
             materialTitle: mat.title,
             pageOrSlideNumber: chunk.pageOrSlideNumber,
-            quoteExcerpt: chunk.extractedText.slice(0, 130),
+            quoteExcerpt: primaryStatement,
           },
         });
       });

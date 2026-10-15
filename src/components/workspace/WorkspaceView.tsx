@@ -12,7 +12,14 @@ import type {
   SavedStudyNote,
   TutorSession,
 } from '../../types';
-import { processUploadedDocument, deriveTopicNameFromChunk } from '../../lib/documentExtraction';
+import {
+  processUploadedDocument,
+  deriveTopicNameFromChunk,
+  extractOrganizedTopicsFromMaterial,
+  extractStudyStatementsFromChunk,
+  isNonInstructionalChunk,
+  isValidTopicHeading,
+} from '../../lib/documentExtraction';
 import { FormattedMessageContent } from '../tutor/FormattedMessageContent';
 import {
   INITIAL_QUIZ_ATTEMPTS,
@@ -192,23 +199,32 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         ? effectiveMasteryTopics.find((t) => t.topicId === targetTopicId)
         : undefined;
 
-    const candidateChunks = sourceMaterials.flatMap((m) =>
-      m.chunks.map((c, cIdx) => {
-        const derivedTopic = deriveTopicNameFromChunk(c, cIdx);
-        return {
-          ...c,
-          materialTitle: m.title,
-          derivedTopic,
-        };
-      })
+    const rawCandidateChunks = sourceMaterials.flatMap((m) =>
+      m.chunks
+        .filter((c) => !isNonInstructionalChunk(c))
+        .map((c, cIdx) => {
+          const derivedTopic = deriveTopicNameFromChunk(c, cIdx);
+          const studyStatements = extractStudyStatementsFromChunk(c);
+          return {
+            ...c,
+            materialTitle: m.title,
+            derivedTopic,
+            studyStatements,
+          };
+        })
     );
+
+    const statementBearingChunks = rawCandidateChunks.filter((c) => c.studyStatements.length > 0);
+    const candidateChunks =
+      statementBearingChunks.length > 0 ? statementBearingChunks : rawCandidateChunks;
 
     const filteredChunks = selectedTopicObj
       ? candidateChunks.filter(
           (c) =>
             c.derivedTopic.toLowerCase() === selectedTopicObj.topicName.toLowerCase() ||
             c.sectionHeading.toLowerCase().includes(selectedTopicObj.topicName.toLowerCase()) ||
-            selectedTopicObj.topicName.toLowerCase().includes(c.derivedTopic.toLowerCase())
+            selectedTopicObj.topicName.toLowerCase().includes(c.derivedTopic.toLowerCase()) ||
+            c.extractedText.toLowerCase().includes(selectedTopicObj.topicName.toLowerCase())
         )
       : candidateChunks;
 
@@ -218,21 +234,18 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       return basePool;
     }
 
-    // Gather distinct statements across all chunks for realistic distractors
-    const allStatements = candidateChunks
-      .flatMap((c) =>
-        c.extractedText
-          .split(/(?<=[.!?])\s+|\n+/)
-          .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-          .filter((s) => s.length > 35 && s.length < 220)
-      );
+    // Gather distinct complete study statements across all instructional chunks for realistic distractors
+    const allStatements = candidateChunks.flatMap((c) => c.studyStatements);
 
     const generated: QuizQuestion[] = [];
     const maxCount = Math.min(desiredCount, Math.max(activeChunks.length, 3));
 
     for (let idx = 0; idx < maxCount; idx++) {
       const chunk = activeChunks[idx % activeChunks.length];
-      const cleanTopicName = selectedTopicObj?.topicName || chunk.derivedTopic || chunk.materialTitle;
+      const validChunkTopic = isValidTopicHeading(chunk.derivedTopic, chunk.materialTitle)
+        ? chunk.derivedTopic
+        : chunk.materialTitle;
+      const cleanTopicName = selectedTopicObj?.topicName || validChunkTopic || chunk.materialTitle;
       const topicSlug = cleanTopicName
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
@@ -240,20 +253,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         .slice(0, 40);
       const resolvedTopicId = selectedTopicObj?.topicId || `topic-${topicSlug || idx}`;
 
-      const sentences = chunk.extractedText
-        .split(/(?<=[.!?])\s+|\n+/)
-        .map((s) => s.replace(/^[-*•\d.)\s]+/, '').trim())
-        .filter((s) => s.length > 30);
-
+      const sentences = chunk.studyStatements;
+      const sentenceIdx = Math.floor(idx / Math.max(activeChunks.length, 1)) + idx;
       const primarySentence =
-        sentences[idx % Math.max(sentences.length, 1)] ||
-        chunk.extractedText.slice(0, 180).trim();
+        sentences[sentenceIdx % Math.max(sentences.length, 1)] ||
+        `The ${cleanTopicName} section in ${chunk.materialTitle} establishes the core principles and operational requirements documented on ${chunk.anchorLabel}.`;
       const correctStatement =
-        primarySentence.length > 175
-          ? `${primarySentence.slice(0, 172)}...`
+        primarySentence.length > 185
+          ? `${primarySentence.slice(0, 182).trim()}...`
           : primarySentence;
 
-      // Pick distractors from other chunks/sentences if available, plus academic distractors
+      // Pick distractors from other chunks' verified statements if available, plus academic distractors
       const otherStatements = allStatements.filter(
         (s) => s !== primarySentence && !chunk.extractedText.includes(s.slice(0, 35))
       );
@@ -304,7 +314,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           materialTitle: chunk.materialTitle,
           sectionHeading: cleanTopicName,
           anchorLabel: chunk.anchorLabel,
-          quoteExcerpt: chunk.extractedText.slice(0, 260),
+          quoteExcerpt: primarySentence,
           similarityScore: 0.96,
         },
       });
@@ -1037,14 +1047,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                     : 'bg-emerald-50 text-emerald-700 border-emerald-200/60';
                   const tagLabel = isPdf ? 'PDF' : isDocx ? 'DOCX' : isPptx ? 'PPTX' : 'NOTES';
 
-                  // Derive unique organized topics from this material's chunks
-                  const matTopics = Array.from(
-                    new Set(
-                      (mat.chunks || [])
-                        .map((c, cIdx) => deriveTopicNameFromChunk(c, cIdx))
-                        .filter(Boolean)
-                    )
-                  ).slice(0, 6);
+                  // Derive unique organized topics from this material's instructional chunks
+                  const matTopics = extractOrganizedTopicsFromMaterial(mat, 6);
 
                   return (
                     <div

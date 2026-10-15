@@ -36,7 +36,12 @@ import {
 } from './lib/storage';
 
 import { calculateNextReview } from './lib/spacedRepetition';
-import { deriveTopicNameFromChunk, isGenericSectionHeading } from './lib/documentExtraction';
+import {
+  deriveTopicNameFromChunk,
+  extractOrganizedTopicsFromMaterial,
+  isGenericSectionHeading,
+  isValidTopicHeading,
+} from './lib/documentExtraction';
 
 import type {
   StudyMaterial,
@@ -57,9 +62,12 @@ function normalizeMaterialsTopics(rawMaterials: StudyMaterial[]): StudyMaterial[
   return rawMaterials.map((mat) => {
     if (!Array.isArray(mat.chunks) || mat.chunks.length === 0) return mat;
     let changed = false;
-    const normalizedChunks = mat.chunks.map((chunk) => {
-      if (isGenericSectionHeading(chunk.sectionHeading)) {
-        const derived = deriveTopicNameFromChunk(chunk);
+    const normalizedChunks = mat.chunks.map((chunk, idx) => {
+      if (
+        isGenericSectionHeading(chunk.sectionHeading) ||
+        !isValidTopicHeading(chunk.sectionHeading, mat.title)
+      ) {
+        const derived = deriveTopicNameFromChunk(chunk, idx);
         if (derived && derived !== chunk.sectionHeading) {
           changed = true;
           return { ...chunk, sectionHeading: derived };
@@ -133,7 +141,10 @@ export default function App() {
     setMasteryTopics((prevTopics) => {
       const practicedMap = new Map<string, TopicMastery>();
       for (const t of prevTopics) {
-        if (t.evidenceCount > 0 || t.status !== 'untested') {
+        if (
+          (t.evidenceCount > 0 || t.status !== 'untested') &&
+          isValidTopicHeading(t.topicName)
+        ) {
           practicedMap.set(t.topicId, t);
           practicedMap.set(t.topicName.toLowerCase(), t);
         }
@@ -144,24 +155,7 @@ export default function App() {
       const seenTopicNames = new Set<string>();
 
       for (const mat of materials) {
-        const chunks = mat.chunks || [];
-        const matTopics: string[] = [];
-
-        for (const chunk of chunks) {
-          const heading = deriveTopicNameFromChunk(chunk).trim();
-          if (
-            heading &&
-            !isGenericSectionHeading(heading) &&
-            !matTopics.some((existing) => existing.toLowerCase() === heading.toLowerCase())
-          ) {
-            matTopics.push(heading);
-          }
-          if (matTopics.length >= 4) break;
-        }
-
-        if (matTopics.length === 0 && mat.title) {
-          matTopics.push(mat.title);
-        }
+        const matTopics = extractOrganizedTopicsFromMaterial(mat, 5);
 
         matTopics.forEach((topicName, idx) => {
           const topicId = idx === 0 ? mat.id : `${mat.id}-topic-${idx}`;
@@ -174,7 +168,10 @@ export default function App() {
           if (existingPracticed) {
             seenTopicIds.add(existingPracticed.topicId);
             seenTopicNames.add(existingPracticed.topicName.toLowerCase());
-            derivedList.push(existingPracticed);
+            derivedList.push({
+              ...existingPracticed,
+              topicName,
+            });
           } else {
             seenTopicIds.add(topicId);
             seenTopicNames.add(lowerName);
@@ -198,10 +195,11 @@ export default function App() {
         });
       }
 
-      // Preserve any practiced topics whose source material was removed or came from custom quizzes
+      // Preserve any valid practiced topics whose source material was removed or came from custom quizzes
       for (const t of prevTopics) {
         if (
           (t.evidenceCount > 0 || t.status !== 'untested') &&
+          isValidTopicHeading(t.topicName) &&
           !seenTopicIds.has(t.topicId) &&
           !seenTopicNames.has(t.topicName.toLowerCase())
         ) {
