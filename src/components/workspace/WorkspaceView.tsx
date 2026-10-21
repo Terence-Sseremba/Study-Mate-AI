@@ -21,6 +21,7 @@ import {
   isValidTopicHeading,
 } from '../../lib/documentExtraction';
 import { FormattedMessageContent } from '../tutor/FormattedMessageContent';
+import { getTimeAwareGreeting } from '../../lib/greeting';
 import {
   INITIAL_QUIZ_ATTEMPTS,
   INITIAL_TOPIC_MASTERY,
@@ -30,6 +31,7 @@ import {
 export type StudioTabType = 'quizzes' | 'mastery' | 'library';
 
 interface WorkspaceViewProps {
+  preferredName?: string;
   materials: StudyMaterial[];
   messages: TutorMessage[];
   onSendMessage: (
@@ -74,6 +76,7 @@ interface WorkspaceViewProps {
 }
 
 export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
+  preferredName,
   materials,
   messages,
   onSendMessage,
@@ -115,6 +118,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [deckCollapsed, setDeckCollapsed] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'sources' | 'tutor' | 'studio'>('tutor');
+  const [greetingChoice] = useState(() => ({
+    hour: new Date().getHours(),
+    variation: Math.floor(Math.random() * 4),
+  }));
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
 
   useEffect(() => {
@@ -1027,7 +1034,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   search
                 </span>
                 <input
-                  className="w-full pl-7 pr-6 py-1 text-xs bg-neutral-100/70 rounded-lg text-neutral-800 placeholder-neutral-400 focus:outline-none focus:bg-white focus:border-neutral-300 transition-all border border-neutral-200/50"
+                  className="w-full pl-7 pr-6 py-1 text-sm bg-neutral-100/70 rounded-lg text-neutral-800 placeholder-neutral-500 focus:outline-none focus:bg-white focus:border-neutral-300 transition-all border border-neutral-200/50"
                   placeholder="Search sources..."
                   type="text"
                   value={searchQuery}
@@ -1049,8 +1056,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                 <div className="w-10 h-10 mx-auto rounded-full bg-neutral-100 flex items-center justify-center text-neutral-400 border border-neutral-200/60">
                   <span className="material-symbols-outlined text-lg">upload_file</span>
                 </div>
-                <p className="text-xs font-semibold text-neutral-700">No sources added yet</p>
-                <p className="text-[11px] text-neutral-400 leading-relaxed max-w-[200px] mx-auto">
+                <p className="text-sm font-semibold text-neutral-700">No sources added yet</p>
+                <p className="text-xs text-neutral-500 leading-relaxed max-w-[200px] mx-auto">
                   Click <strong className="text-neutral-700 font-medium">Add sources</strong> above to upload PDFs, slides, or paste notes.
                 </p>
               </div>
@@ -1096,11 +1103,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                               className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
                               onClick={() => onInspectMaterial(mat)}
                             >
-                              <span className={`px-1 py-0.2 rounded ${tagColor} font-mono text-[9px] font-bold border shrink-0`}>
+                              <span className={`px-1 py-0.2 rounded ${tagColor} font-mono text-xs font-bold border shrink-0`}>
                                 {tagLabel}
                               </span>
                               <p
-                                className={`text-xs font-medium truncate ${
+                                className={`text-sm font-medium truncate ${
                                   isActive
                                     ? 'text-neutral-800 group-hover:text-neutral-900 group-hover:underline'
                                     : 'text-neutral-400 line-through'
@@ -1152,7 +1159,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 text-neutral-400 font-mono text-[10px] mt-1">
+                          <div className="flex flex-wrap items-center gap-1.5 text-neutral-500 font-mono text-xs mt-1">
                             <span>{mat.fileSizeFormatted}</span>
                             {mat.pageCount && (
                               <>
@@ -1179,7 +1186,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                           {/* Organized Topics extracted from this material */}
                           {matTopics.length > 0 && (
                             <div className="mt-2 pt-1.5 border-t border-neutral-100 space-y-1">
-                              <span className="block font-mono text-[9px] uppercase tracking-wider text-neutral-400 font-semibold">
+                              <span className="block font-mono text-xs uppercase tracking-wider text-neutral-500 font-semibold">
                                 Organized Topics ({matTopics.length})
                               </span>
                               <div className="flex flex-wrap gap-1">
@@ -1192,7 +1199,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                                       setInputText(`Explain "${topicName}" from ${mat.title}.`);
                                       textareaRef.current?.focus();
                                     }}
-                                    className="px-1.5 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200/80 text-neutral-700 text-[10px] font-medium truncate max-w-full transition-colors cursor-pointer text-left"
+                                    className="px-1.5 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200/80 text-neutral-700 text-xs font-medium truncate max-w-full transition-colors cursor-pointer text-left"
                                   >
                                     {topicName}
                                   </button>
@@ -1297,11 +1304,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   <span className="material-symbols-outlined text-2xl">auto_awesome</span>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-semibold text-neutral-900">
-                    Welcome to StudyMate AI
+                  <h3 className="text-lg font-semibold text-neutral-900">
+                    {getTimeAwareGreeting(preferredName, greetingChoice.hour, greetingChoice.variation)}
                   </h3>
-                  <p className="text-xs text-neutral-500 leading-relaxed max-w-md mx-auto">
-                    Upload your course syllabus, lecture slides, or textbook readings in the left panel to ground conversations in your exact materials. Or ask any question below to get started.
+                  <p className="text-sm text-neutral-500 leading-relaxed max-w-md mx-auto">
+                    Upload your study materials, explore a topic, or test your knowledge with a quiz.
                   </p>
                 </div>
 
@@ -1314,10 +1321,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                     <span className="material-symbols-outlined text-rose-600 text-lg mb-1 block">
                       picture_as_pdf
                     </span>
-                    <span className="text-xs font-semibold text-neutral-800 group-hover:text-neutral-900 block">
+                    <span className="text-sm font-semibold text-neutral-800 group-hover:text-neutral-900 block">
                       Upload PDF
                     </span>
-                    <span className="text-[10px] text-neutral-400 block mt-0.5">
+                    <span className="text-xs text-neutral-500 block mt-0.5">
                       Lectures, papers, textbooks
                     </span>
                   </button>
@@ -1330,10 +1337,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                     <span className="material-symbols-outlined text-blue-600 text-lg mb-1 block">
                       content_paste
                     </span>
-                    <span className="text-xs font-semibold text-neutral-800 group-hover:text-neutral-900 block">
+                    <span className="text-sm font-semibold text-neutral-800 group-hover:text-neutral-900 block">
                       Paste Notes
                     </span>
-                    <span className="text-[10px] text-neutral-400 block mt-0.5">
+                    <span className="text-xs text-neutral-500 block mt-0.5">
                       Study notes, syllabus text
                     </span>
                   </button>
@@ -1346,10 +1353,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                     <span className="material-symbols-outlined text-emerald-600 text-lg mb-1 block">
                       quiz
                     </span>
-                    <span className="text-xs font-semibold text-neutral-800 group-hover:text-neutral-900 block">
+                    <span className="text-sm font-semibold text-neutral-800 group-hover:text-neutral-900 block">
                       Take a Concept Quiz
                     </span>
-                    <span className="text-[10px] text-neutral-400 block mt-0.5">
+                    <span className="text-xs text-neutral-500 block mt-0.5">
                       Interactive assessment from sources
                     </span>
                   </button>
@@ -1366,8 +1373,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                 if (isUser) {
                   return (
                     <article key={msg.id} className="flex justify-end">
-                      <div className="max-w-xl bg-neutral-100 border border-neutral-200/70 text-neutral-900 rounded-2xl px-4 py-2.5 shadow-xs text-xs sm:text-sm leading-relaxed space-y-1">
-                        <div className="flex items-center justify-between gap-4 text-neutral-400 text-[10px]">
+                      <div className="max-w-xl bg-neutral-100 border border-neutral-200/70 text-neutral-900 rounded-2xl px-4 py-2.5 shadow-xs text-sm leading-relaxed space-y-1">
+                        <div className="flex items-center justify-between gap-4 text-neutral-500 text-xs">
                           <span className="font-medium text-neutral-600">You</span>
                           <span>{formattedTime}</span>
                         </div>
@@ -1410,7 +1417,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                             <span className={`w-1.5 h-1.5 rounded-full ${groundingDotColor}`}></span>
                             {groundingBadgeLabel}
                           </span>
-                          <span className="text-neutral-400 text-[11px]">• {formattedTime}</span>
+                          <span className="text-neutral-500 text-xs">• {formattedTime}</span>
                         </div>
                         <button
                           className="text-neutral-400 hover:text-neutral-700 transition-colors p-1"
@@ -1423,7 +1430,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                       </div>
 
                       {/* AI Response Card (Clean White NotebookLM Style) */}
-                      <div className="p-4 sm:p-5 rounded-2xl bg-white border border-neutral-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-3 text-neutral-800 text-xs sm:text-sm leading-relaxed">
+                      <div className="p-4 sm:p-5 rounded-2xl bg-white border border-neutral-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-3 text-neutral-800 text-sm leading-relaxed">
                         {msg.errorState ? (
                           <div className="space-y-3">
                             <div className="flex items-start gap-2.5 text-amber-800 bg-amber-50/80 border border-amber-200/70 p-3 rounded-xl">
@@ -1587,8 +1594,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           <div className="relative bg-white rounded-3xl p-2.5 transition-all shadow-[0_4px_20px_rgba(0,0,0,0.06)] border border-neutral-200 focus-within:border-neutral-400 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.1)]">
             <textarea
               ref={textareaRef}
-              className="w-full bg-transparent text-neutral-900 text-xs sm:text-sm placeholder-neutral-400 focus:outline-none resize-none px-3 py-1 font-sans"
-              placeholder="Ask a question about your sources... (Enter to send)"
+              className="w-full bg-transparent text-neutral-900 text-sm placeholder-neutral-500 focus:outline-none resize-none px-3 py-1 font-sans"
+              placeholder="Ask a question about your sources..."
               rows={2}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
@@ -1618,7 +1625,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   <span>{activeCount} sources selected</span>
                 </button>
 
-                <div className="flex items-center bg-neutral-100 rounded-lg p-0.5 border border-neutral-200/60 text-[11px]">
+                <div className="flex items-center bg-neutral-100 rounded-lg p-0.5 border border-neutral-200/60 text-xs">
                   <button
                     className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
                       interactionMode === 'smart_tutor'

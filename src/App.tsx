@@ -721,6 +721,7 @@ export default function App() {
         onSelectCourse={setActiveCourse}
       >
         <WorkspaceView
+          preferredName={isFirstVisit ? undefined : student.name}
           materials={materials}
           messages={tutorMessages}
           onSendMessage={handleSendMessage}
