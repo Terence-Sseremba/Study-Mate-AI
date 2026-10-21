@@ -139,3 +139,64 @@
   color: #4b5563 !important;
 }
 
+.mobile-workspace-nav {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .workspace-layout {
+    flex-direction: column;
+  }
+
+  .mobile-workspace-nav {
+    display: flex;
+    flex: none;
+    width: 100%;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .mobile-workspace-nav button {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.65rem 0.25rem;
+    color: #4b5563;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .mobile-workspace-nav button[aria-current="page"] {
+    color: #18181b;
+    border-bottom: 2px solid #18181b;
+  }
+
+  .mobile-workspace-nav .material-symbols-outlined {
+    font-size: 1.1rem;
+  }
+
+  .workspace-layout > #left-sources-panel,
+  .workspace-layout > #right-study-deck,
+  .workspace-layout > section {
+    display: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    width: 100% !important;
+  }
+
+  .workspace-layout.mobile-panel-sources > #left-sources-panel,
+  .workspace-layout.mobile-panel-tutor > section,
+  .workspace-layout.mobile-panel-studio > #right-study-deck {
+    display: flex;
+  }
+
+  #left-sources-panel > .absolute,
+  #right-study-deck > .absolute {
+    display: none;
+  }
+}
+

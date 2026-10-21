@@ -114,6 +114,18 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   // Panel collapse states
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [deckCollapsed, setDeckCollapsed] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<'sources' | 'tutor' | 'studio'>('tutor');
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobile(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  const showSourcesContent = isMobile || !sourcesCollapsed;
+  const showStudioContent = isMobile || !deckCollapsed;
 
   // Adjustable column widths (Left Sources & Right Studio)
   const [leftPanelWidth, setLeftPanelWidth] = useState<number>(() => {
@@ -363,6 +375,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     setIsQuizFloating(false);
     setStudioTab('quizzes');
     setDeckCollapsed(false);
+    if (isMobile) setMobilePanel('studio');
   };
 
   // Expand docked sidebar quiz back into the floating blurred window without affecting any state
@@ -785,7 +798,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const activeCount = selectedMaterialIds.length;
 
   return (
-    <div className="w-full h-full flex flex-row overflow-hidden relative select-none">
+    <div className={`workspace-layout mobile-panel-${mobilePanel} w-full h-full flex flex-row overflow-hidden relative select-none`}>
+      <nav className="mobile-workspace-nav" aria-label="Workspace panels">
+        {(['sources', 'tutor', 'studio'] as const).map((panel) => (
+          <button key={panel} type="button" aria-current={mobilePanel === panel ? 'page' : undefined} onClick={() => setMobilePanel(panel)}>
+            <span className="material-symbols-outlined" aria-hidden="true">
+              {panel === 'sources' ? 'folder_open' : panel === 'tutor' ? 'psychology' : 'auto_awesome'}
+            </span>
+            <span>{panel === 'sources' ? 'Sources' : panel === 'tutor' ? 'Tutor' : 'Studio'}</span>
+          </button>
+        ))}
+      </nav>
       {/* Toast Feedback for Save Note */}
       {savedNotesToast && (
         <div className="fixed top-20 right-6 z-50 bg-secondary text-on-secondary px-3.5 py-2 rounded-xl shadow-lg flex items-center gap-2 text-label-md font-medium animate-in fade-in slide-in-from-top-2">
@@ -848,7 +871,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         } select-none group/sidebar`}
       >
         {/* Resize Handle on Right Border */}
-        {!sourcesCollapsed && (
+        {!sourcesCollapsed && !isMobile && (
           <div
             className="absolute top-0 right-0 bottom-0 w-2 cursor-col-resize hover:bg-neutral-300 active:bg-neutral-400 z-30 flex items-center justify-center transition-colors group"
             onMouseDown={handleLeftResizeStart}
@@ -862,7 +885,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         {/* Collapse Toggle & Sources Header */}
         <div className="p-3 space-y-2 bg-white flex-shrink-0 border-b border-neutral-200/60">
           <div className="flex items-center justify-between">
-            {!sourcesCollapsed ? (
+            {showSourcesContent ? (
               <>
                 <div className="flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-neutral-800 text-lg">folder_open</span>
@@ -876,7 +899,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   </span>
                   <button
                     id="collapse-sources-btn"
-                    className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"
+                    className="hidden md:block p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"
                     title="Collapse sources panel [⌘B]"
                     onClick={() => setSourcesCollapsed(true)}
                     type="button"
@@ -898,7 +921,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
 
           {/* Collapsed Rail View */}
-          {sourcesCollapsed && (
+          {sourcesCollapsed && !isMobile && (
             <div id="sources-collapsed-rail" className="flex flex-col items-center gap-2.5 pt-2">
               <div className="w-6 h-[1px] bg-neutral-200"></div>
               {materials.slice(0, 5).map((mat) => {
@@ -927,7 +950,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           )}
 
           {/* Expandable Content Wrap */}
-          {!sourcesCollapsed && (
+          {showSourcesContent && (
             <div id="sources-content-wrap" className="space-y-2 pt-1">
               {/* Add Source Button + Dropdown (NotebookLM Style) */}
               <div className="relative">
@@ -1019,7 +1042,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         </div>
 
         {/* Scrollable Source Cards Stream */}
-        {!sourcesCollapsed && (
+        {showSourcesContent && (
           <div className="flex-1 overflow-y-auto px-2.5 space-y-2 py-2">
             {filteredMaterials.length === 0 ? (
               <div className="text-center py-10 px-3 text-neutral-400 space-y-2">
@@ -1188,7 +1211,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         )}
 
         {/* Sync Status Footer */}
-        {!sourcesCollapsed && (
+        {showSourcesContent && (
           <div className="p-2.5 bg-neutral-50 border-t border-neutral-200/70 flex items-center justify-between text-neutral-500 font-mono text-[11px]">
             <span className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
@@ -1583,7 +1606,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 hover:bg-neutral-200/70 text-neutral-700 font-mono text-[11px] font-medium transition-colors cursor-pointer border border-neutral-200/60"
                   type="button"
                   onClick={() => {
-                    setSourcesCollapsed((prev) => !prev);
+                    if (isMobile) setMobilePanel('sources');
+                    else setSourcesCollapsed((prev) => !prev);
                     if (activeMaterialFilter && onMaterialFilterChange) {
                       onMaterialFilterChange(undefined);
                     }
@@ -1594,7 +1618,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   <span>{activeCount} sources selected</span>
                 </button>
 
-                <div className="hidden sm:flex items-center bg-neutral-100 rounded-lg p-0.5 border border-neutral-200/60 text-[11px]">
+                <div className="flex items-center bg-neutral-100 rounded-lg p-0.5 border border-neutral-200/60 text-[11px]">
                   <button
                     className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
                       interactionMode === 'smart_tutor'
@@ -1648,7 +1672,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         } select-none group/deck`}
       >
         {/* Resize Handle on Left Border */}
-        {!deckCollapsed && (
+        {!deckCollapsed && !isMobile && (
           <div
             className="absolute top-0 left-0 bottom-0 w-2 cursor-col-resize hover:bg-neutral-300/80 active:bg-neutral-400 z-30 flex items-center justify-center transition-colors group"
             onMouseDown={handleRightResizeStart}
@@ -1662,7 +1686,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         {/* Section Header with Collapse & Expand Actions */}
         <div className="p-3 bg-white border-b border-neutral-200/60 flex-shrink-0 space-y-2">
           <div className="flex items-center justify-between">
-            {!deckCollapsed ? (
+            {showStudioContent ? (
               <>
                 <div className="flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-neutral-800 text-lg">
@@ -1677,7 +1701,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                 </div>
                 <div className="flex items-center gap-1">
                   <button
-                    className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
+                    className="hidden md:block p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
                     title="Collapse Studio Deck"
                     onClick={() => setDeckCollapsed(true)}
                     type="button"
@@ -1699,7 +1723,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
 
           {/* Segmented Tab Switcher */}
-          {!deckCollapsed && (
+          {showStudioContent && (
             <div className="grid grid-cols-3 gap-1 bg-neutral-100/90 p-1 rounded-2xl border border-neutral-200/70 shadow-2xs">
               <button
                 id="studio-tab-quizzes"
@@ -1745,7 +1769,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         </div>
 
         {/* Collapsed Deck Rail */}
-        {deckCollapsed && (
+        {deckCollapsed && !isMobile && (
           <div id="deck-collapsed-rail" className="flex flex-col items-center gap-2 pt-2 flex-1">
             <div className="w-6 h-[1px] bg-neutral-200"></div>
             <button
@@ -1789,7 +1813,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         )}
 
         {/* Deck Scrollable Content */}
-        {!deckCollapsed && (
+        {showStudioContent && (
           <div id="deck-content-wrap" className="flex-1 overflow-y-auto p-3 space-y-3">
             {/* ======================================================== */}
             {/* TAB 1: QUIZZES (Interactive Inline Quiz Runner + Config)  */}
@@ -2738,7 +2762,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         )}
 
         {/* Footer Sync State */}
-        {!deckCollapsed && (
+        {showStudioContent && (
           <div className="p-2.5 bg-neutral-50 border-t border-neutral-200/70 flex items-center justify-between text-neutral-500 font-mono text-[11px] flex-shrink-0">
             <span>Local Storage: Synced</span>
             <span className="flex items-center gap-1 text-emerald-700 font-medium">

@@ -86,7 +86,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               type="button"
             >
               <span className="material-symbols-outlined text-neutral-600 text-sm">book_2</span>
-              <span className="truncate max-w-[150px] sm:max-w-[200px]">
+              <span className="truncate max-w-[70px] min-[400px]:max-w-[110px] sm:max-w-[200px]">
                 {activeCourse}
               </span>
               <span className="material-symbols-outlined text-neutral-500 text-xs">expand_more</span>
@@ -211,7 +211,8 @@ export const AppShell: React.FC<AppShellProps> = ({
 
           {/* New Session Button */}
           <button
-            className="flex items-center gap-1.5 bg-neutral-900 text-white hover:bg-neutral-800 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-xs cursor-pointer"
+            aria-label="New Chat"
+            className="flex items-center gap-1.5 bg-neutral-900 text-white hover:bg-neutral-800 px-2 sm:px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-xs cursor-pointer"
             type="button"
             onClick={() => {
               if (onNewSession) onNewSession();
@@ -219,7 +220,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             }}
           >
             <span className="material-symbols-outlined text-sm">add</span>
-            <span>New Chat</span>
+            <span className="hidden sm:inline">New Chat</span>
             <kbd className="hidden xl:inline-block ml-0.5 px-1 py-0.2 bg-white/20 rounded text-[9px]">
               ⌘K
             </kbd>
