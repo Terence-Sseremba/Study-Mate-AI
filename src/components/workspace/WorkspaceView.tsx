@@ -30,6 +30,32 @@ import {
 
 export type StudioTabType = 'quizzes' | 'mastery' | 'library';
 
+const mobilePanelOrder = ['sources', 'tutor', 'studio'] as const;
+type MobilePanel = (typeof mobilePanelOrder)[number];
+const mobileLayoutQuery = '(max-width: 767px)';
+const swipeThreshold = 70;
+const swipeEdgeInset = 24;
+const swipeExcludedSelector = [
+  'button, a, input, textarea, select, label, summary',
+  '[contenteditable], [draggable="true"], [data-no-workspace-swipe]',
+  '[role="button"], [role="dialog"], [role="menu"], [role="listbox"]',
+  '[role="option"], [role="slider"], [role="tab"], [role="checkbox"], [role="radio"]',
+].join(', ');
+
+function isSwipeExcluded(target: EventTarget | null, workspace: HTMLElement): boolean {
+  if (!(target instanceof Element)) return true;
+
+  for (let element: Element | null = target; element && element !== workspace; element = element.parentElement) {
+    if (element.matches(swipeExcludedSelector)) return true;
+
+    const style = window.getComputedStyle(element);
+    if (style.cursor === 'pointer' || style.position === 'fixed') return true;
+    if (/auto|scroll/.test(style.overflowX) && element.scrollWidth > element.clientWidth) return true;
+  }
+
+  return false;
+}
+
 interface WorkspaceViewProps {
   preferredName?: string;
   materials: StudyMaterial[];
@@ -117,22 +143,53 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   // Panel collapse states
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [deckCollapsed, setDeckCollapsed] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<'sources' | 'tutor' | 'studio'>('tutor');
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>('tutor');
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
   const [greetingChoice] = useState(() => ({
     hour: new Date().getHours(),
     variation: Math.floor(Math.random() * 4),
   }));
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia(mobileLayoutQuery).matches);
 
   useEffect(() => {
-    const media = window.matchMedia('(max-width: 767px)');
-    const update = () => setIsMobile(media.matches);
+    const media = window.matchMedia(mobileLayoutQuery);
+    const update = () => {
+      swipeStart.current = null;
+      setIsMobile(media.matches);
+    };
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);
 
   const showSourcesContent = isMobile || !sourcesCollapsed;
   const showStudioContent = isMobile || !deckCollapsed;
+
+  const handleWorkspaceTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    swipeStart.current = null;
+    if (!window.matchMedia(mobileLayoutQuery).matches || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    if (touch.clientX < swipeEdgeInset || touch.clientX > window.innerWidth - swipeEdgeInset) return;
+    if (!(event.target instanceof Element) || !event.target.closest('#left-sources-panel, section, #right-study-deck')) return;
+    if (isSwipeExcluded(event.target, event.currentTarget)) return;
+    swipeStart.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleWorkspaceTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start || !window.matchMedia(mobileLayoutQuery).matches || event.changedTouches.length !== 1) return;
+    const dx = event.changedTouches[0].clientX - start.x;
+    const dy = event.changedTouches[0].clientY - start.y;
+    if (Math.abs(dx) < swipeThreshold || Math.abs(dx) < Math.abs(dy) * 2) return;
+    if (window.getSelection()?.toString()) return;
+    setMobilePanel((current) => {
+      const nextIndex = Math.max(
+        0,
+        Math.min(mobilePanelOrder.length - 1, mobilePanelOrder.indexOf(current) + (dx < 0 ? 1 : -1))
+      );
+      return mobilePanelOrder[nextIndex];
+    });
+  };
 
   // Adjustable column widths (Left Sources & Right Studio)
   const [leftPanelWidth, setLeftPanelWidth] = useState<number>(() => {
@@ -805,9 +862,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const activeCount = selectedMaterialIds.length;
 
   return (
-    <div className={`workspace-layout mobile-panel-${mobilePanel} w-full h-full flex flex-row overflow-hidden relative select-none`}>
+    <div
+      className={`workspace-layout mobile-panel-${mobilePanel} w-full h-full flex flex-row overflow-hidden relative select-none`}
+      onTouchStart={handleWorkspaceTouchStart}
+      onTouchEnd={handleWorkspaceTouchEnd}
+      onTouchCancel={() => { swipeStart.current = null; }}
+      onTouchMove={(event) => { if (event.touches.length !== 1) swipeStart.current = null; }}
+    >
       <nav className="mobile-workspace-nav" aria-label="Workspace panels">
-        {(['sources', 'tutor', 'studio'] as const).map((panel) => (
+        {mobilePanelOrder.map((panel) => (
           <button key={panel} type="button" aria-current={mobilePanel === panel ? 'page' : undefined} onClick={() => setMobilePanel(panel)}>
             <span className="material-symbols-outlined" aria-hidden="true">
               {panel === 'sources' ? 'folder_open' : panel === 'tutor' ? 'psychology' : 'auto_awesome'}
