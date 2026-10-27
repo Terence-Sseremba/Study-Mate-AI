@@ -276,7 +276,7 @@ export default function App() {
       .then((data) => {
         setApiStatus({
           apiKeyConfigured: Boolean(data.apiKeyConfigured),
-          model: data.model || 'gemini-3.8-flash',
+          model: data.model || 'gemini-3.6-flash',
           groundingEngine: data.groundingEngine || 'Local-Semantic-Index + Relevance Gate',
         });
       })
@@ -284,7 +284,7 @@ export default function App() {
         console.warn('Backend /api/status check deferred:', err);
         setApiStatus({
           apiKeyConfigured: false,
-          model: 'gemini-3.8-flash',
+          model: 'gemini-3.6-flash',
           groundingEngine: 'Local-Semantic-Index (Client fallback)',
         });
       });
@@ -416,7 +416,7 @@ export default function App() {
           studentName: student?.name || 'Student',
           mode: tutorInteractionMode,
           interactionMode: tutorInteractionMode,
-          history: tutorMessages.slice(-6),
+          history: tutorMessages.filter((message) => !message.errorState).slice(-30),
           preferences: tutorPreferences,
         }),
       });

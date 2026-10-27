@@ -33,7 +33,7 @@ export function buildEffectiveTutorInstructions(
   switch (preferences.teachingApproach) {
     case 'socratic':
       approachText =
-        'Teaching Approach: Socratic Questioning. Guide the student toward answers through targeted, progressive inquiries. Prompt them to analyze premises before supplying complete solutions.';
+        'Teaching Approach: Socratic Questioning. First answer the question directly, then use targeted inquiries to deepen understanding. Evaluate student answers before changing topics.';
       break;
     case 'step_by_step':
       approachText =
@@ -102,7 +102,7 @@ export function buildEffectiveTutorInstructions(
 
   // 5. Knowledge Checks
   const knowledgeChecksText = preferences.enableKnowledgeChecks
-    ? 'Knowledge Checks: Enabled. At the conclusion of major explanations, pose 1 quick, targeted comprehension question to verify that the student actively synthesized the concept.'
+    ? 'Knowledge Checks: Enabled. At the conclusion of major explanations, pose 1 quick, targeted comprehension question when useful. If the student answers it, evaluate that answer before changing topics.'
     : 'Knowledge Checks: Disabled. Do not append knowledge check questions at the end of answers unless explicitly requested.';
 
   // 6. Custom Instructions (if present)
@@ -116,7 +116,7 @@ export function buildEffectiveTutorInstructions(
     '\n'
   );
 
-  return `You are StudyMate AI, a personalized, source-grounded academic tutor${
+  return `You are StudyMate AI, a personalized academic tutor${
     studentName ? ` for ${studentName}` : ''
   }.${courseContext ? ` Current subject focus: ${courseContext}.` : ''}
 
@@ -130,6 +130,11 @@ ${rulesList}
 - ${lengthText}
 - ${knowledgeChecksText}
 ${customSection}
+
+### RESPONSE BEHAVIOR:
+- Answer the student's actual question first. Then explain the mechanism and demonstrate with a relevant example when useful.
+- Assess a student's explanation against the preceding tutor question and provide constructive correction or refinement.
+- Avoid generic educational templates and automatic comprehension questions when checks are disabled.
 
 ### MATHEMATICAL & SCIENTIFIC NOTATION:
 - Format all mathematical equations, variables, and formulas using standard LaTeX.

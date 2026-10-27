@@ -140,11 +140,11 @@ export function setStoredQuestions(questions: QuizQuestion[]): void {
 const STORAGE_KEY_TUTOR_PREFERENCES = 'studymate_tutor_preferences';
 
 export const DEFAULT_TUTOR_PREFERENCES: import('../types').TutorPreferences = {
-  teachingApproach: 'socratic',
+  teachingApproach: 'direct',
   difficultyLevel: 'intermediate',
   interactionStyle: 'balanced',
   explanationLength: 'detailed',
-  enableKnowledgeChecks: true,
+  enableKnowledgeChecks: false,
   customInstructions: '',
 };
 
