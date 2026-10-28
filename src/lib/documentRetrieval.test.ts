@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { buildCitation, extractQueryKeywords, retrieveRelevantChunks, wordsMatch } from './documentRetrieval.ts';
+import { buildCitation, extractQueryKeywords, normalizeRetrievalQuery, retrieveRelevantChunks, wordsMatch } from './documentRetrieval.ts';
 import type { StudyMaterial, SourceChunk } from '../types/index.ts';
 import { prepareConversation, resolveRetrievalQuestion } from '../server/conversationContext.ts';
 
@@ -16,6 +16,17 @@ function material(heading: string, id = 'math'): StudyMaterial {
   })) as SourceChunk[];
   return { id, title: 'Matrix Algebra', filename: 'matrix.pdf', chunks } as StudyMaterial;
 }
+
+test('retrieval normalization removes source boundaries without stripping academic subjects', () => {
+  assert.equal(
+    normalizeRetrievalQuery('According to my uploaded lecture notes only, explain runtime polymorphism and method overriding. Do not use external knowledge.'),
+    'explain runtime polymorphism and method overriding',
+  );
+  assert.equal(normalizeRetrievalQuery('Explain inheritance. Use only my uploaded notes.'), 'Explain inheritance');
+  assert.equal(normalizeRetrievalQuery('Explain inheritance without using outside sources.'), 'Explain inheritance');
+  assert.equal(normalizeRetrievalQuery('Explain external knowledge in epistemology.'), 'Explain external knowledge in epistemology');
+  assert.equal(normalizeRetrievalQuery('Explain lecture notes as an academic genre.'), 'Explain lecture notes as an academic genre');
+});
 
 for (const heading of ['A 3 × 3 Determinant', 'Page 12']) {
   test(`determinant retrieval under ${heading}`, () => {

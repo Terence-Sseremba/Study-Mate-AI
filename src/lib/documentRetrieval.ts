@@ -327,6 +327,23 @@ function isBroadDocumentStudyQuery(query: string, extractedKeywords: string[]): 
   );
 }
 
+// Remove only explicit source-boundary instructions from retrieval scoring.
+// The original question remains in the conversation sent to the tutor.
+const SOURCE_REFERENCE = String.raw`(?:my|the)\s+(?:(?:uploaded|selected)\s+)?(?:(?:lecture|course)\s+)?(?:notes?|materials?|documents?|files?|pdfs?|sources?)`;
+const SOURCE_BOUNDARY_PATTERNS = [
+  new RegExp(String.raw`\b(?:according\s+to|based\s+(?:only\s+)?on)\s+${SOURCE_REFERENCE}(?:\s+only)?\b`, 'gi'),
+  new RegExp(String.raw`\b(?:use|using|consult|rely\s+on)\s+only\s+${SOURCE_REFERENCE}\b`, 'gi'),
+  new RegExp(String.raw`\bonly\s+(?:use|consult)\s+${SOURCE_REFERENCE}\b`, 'gi'),
+  new RegExp(String.raw`\b(?:use|using|consult|rely\s+on)\s+${SOURCE_REFERENCE}\s+only\b`, 'gi'),
+  /\b(?:do\s+not|don't|without)\s+(?:use|using|include|including|rely\s+on|relying\s+on|draw\s+on|drawing\s+on)\s+(?:any\s+)?(?:external|outside|general)\s+(?:knowledge|information|sources?)\b/gi,
+];
+
+export function normalizeRetrievalQuery(query: string): string {
+  return SOURCE_BOUNDARY_PATTERNS.reduce((text, pattern) => text.replace(pattern, ' '), query)
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, '');
+}
+
 export interface ScoredChunkMatch {
   chunk: SourceChunk;
   score: number; // 0.0 to 1.0
@@ -430,20 +447,21 @@ export function retrieveRelevantChunks(
     };
   }
 
-  const rawQueryKeywords = extractQueryKeywords(query);
+  const scoringQuery = normalizeRetrievalQuery(query);
+  const rawQueryKeywords = extractQueryKeywords(scoringQuery);
   // A requested comparison language can be taught as a supplement to an
   // established subject. It must still be matched when it is the subject.
-  const hasComparisonRequest = /\b(?:compare|comparison|versus|vs|same|similar|equivalent|in|using|examples?|analogies?)\b/i.test(query);
+  const hasComparisonRequest = /\b(?:compare|comparison|versus|vs|same|similar|equivalent|in|using|examples?|analogies?)\b/i.test(scoringQuery);
   const queryKeywords = rawQueryKeywords.filter((keyword) =>
     !(LANGUAGE_TOKENS.has(keyword) && hasComparisonRequest && rawQueryKeywords.some((other) =>
       other !== keyword && !GENERIC_INQUIRY_NOUNS.has(other) && !LANGUAGE_TOKENS.has(other)
     ))
   );
-  const queryPhrases = extractQueryPhrases(query);
+  const queryPhrases = extractQueryPhrases(scoringQuery);
 
   // Handle broad overview/summary/concept study requests on the selected sources
   if (queryKeywords.length === 0) {
-    if (isBroadDocumentStudyQuery(query, queryKeywords)) {
+    if (isBroadDocumentStudyQuery(scoringQuery, queryKeywords)) {
       const representativeMatches: ScoredChunkMatch[] = [];
       // Pick representative chunks across eligible materials
       for (const mat of eligibleMaterials) {
@@ -657,7 +675,7 @@ export function retrieveRelevantChunks(
 
   // If query is a broad document study query (e.g. "What are the main requirements?" with no external subject keywords)
   // and no literal keyword matched, fall back to the top chunks of the selected documents.
-  if (qualifyingMatches.length === 0 && isBroadDocumentStudyQuery(query, queryKeywords)) {
+  if (qualifyingMatches.length === 0 && isBroadDocumentStudyQuery(scoringQuery, queryKeywords)) {
     qualifyingMatches = allChunks.slice(0, maxResults).map((chunk) => ({
       chunk,
       score: 0.75,

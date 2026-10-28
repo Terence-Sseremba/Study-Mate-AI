@@ -50,6 +50,19 @@ test('real inheritance PDF supports distributed grounded tutoring', { skip: !exi
     assert.equal(retrieved.isSufficient, true, query);
     assert.ok(retrieved.matches.length <= 6, query);
   }
+  const topicQuestion = 'Explain runtime polymorphism and method overriding.';
+  const sourceBoundedQuestion = 'According to my uploaded lecture notes only, explain runtime polymorphism and method overriding. Do not use external knowledge.';
+  const topicMatches = retrieve(topicQuestion);
+  const boundedMatches = retrieve(sourceBoundedQuestion);
+  assert.equal(topicMatches.isSufficient, true);
+  assert.equal(boundedMatches.isSufficient, true);
+  assert.ok(topicMatches.matches.some(match => match.chunk.pageNumber === 34));
+  assert.ok(boundedMatches.matches.some(match => match.chunk.pageNumber === 34));
+  assert.equal(
+    retrieve('According to my uploaded lecture notes only, explain photosynthesis. Do not use external knowledge.').isSufficient,
+    false,
+  );
+  assert.equal(retrieve('Explain polymorphism and typecasting. Do not use external knowledge.').isSufficient, true);
   const distributed = retrieve('Explain inheritance, upcasting, downcasting, and typecasting');
   const pages = distributed.matches.map(match => match.chunk.pageNumber);
   for (const page of [41, 44, 46]) assert.ok(pages.includes(page), `missing page ${page}`);

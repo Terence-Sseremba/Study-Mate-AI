@@ -72,11 +72,13 @@ test('configured model and labels match both successful tutoring routes', async 
   const oldKey = process.env.GEMINI_API_KEY;
   const oldFetch = globalThis.fetch;
   const urls: string[] = [];
+  const requestBodies: string[] = [];
   try {
     process.chdir(fileURLToPath(new URL('.', import.meta.url)));
     process.env.GEMINI_API_KEY = 'test-key';
     globalThis.fetch = (async (input, init) => {
       urls.push(String(input));
+      requestBodies.push(String(init?.body));
       const grounded = String(init?.body).includes('VERIFIED GROUNDING SOURCE PASSAGES');
       const answer = grounded
         ? 'Inheritance lets a child class reuse and extend a parent class [PASSAGE 1]. Source: Java inheritance, Page 1.'
@@ -105,7 +107,12 @@ test('configured model and labels match both successful tutoring routes', async 
     assert.equal(grounded.model, 'gemini-3.6-flash (Source-Grounded)');
     assert.equal(grounded.citations.length, 1);
     assert.equal(grounded.citations[0].pageNumber, 1);
-    assert.equal(urls.length, 2);
+    const originalQuestion = 'According to my uploaded notes only, explain inheritance. Do not use external knowledge.';
+    const sourceBounded = await request(originalQuestion, 'grounded_study', ['java']);
+    assert.equal(sourceBounded.status, 200);
+    assert.equal(sourceBounded.route, 'grounded');
+    assert.ok(requestBodies[2].includes(originalQuestion));
+    assert.equal(urls.length, 3);
     assert.ok(urls.every(url => url.includes('gemini-3.6-flash:generateContent')));
   } finally {
     globalThis.fetch = oldFetch;
