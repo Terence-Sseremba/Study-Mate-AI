@@ -73,6 +73,12 @@ test('configured model and labels match both successful tutoring routes', async 
   const oldFetch = globalThis.fetch;
   const urls: string[] = [];
   const requestBodies: string[] = [];
+  const unselectedSource = {
+    ...source, id: 'other', title: 'Unselected material', filename: 'other.pdf',
+    chunks: [{ ...source.chunks[0], id: 'other-p1', materialId: 'other',
+      materialTitle: 'Unselected material', filename: 'other.pdf',
+      extractedText: 'UNSELECTED_SOURCE_CONTENT' }],
+  } as StudyMaterial;
   try {
     process.chdir(fileURLToPath(new URL('.', import.meta.url)));
     process.env.GEMINI_API_KEY = 'test-key';
@@ -100,18 +106,29 @@ test('configured model and labels match both successful tutoring routes', async 
     assert.equal(smart.route, 'general');
     assert.equal(smart.model, 'gemini-3.6-flash (General Knowledge)');
     assert.deepEqual(smart.citations, []);
+    assert.match(requestBodies[0], /using general academic knowledge/i);
 
-    const grounded = await request('Explain inheritance', 'grounded_study', ['java']);
+    const grounded = await request('Explain inheritance', 'grounded_study', ['java'], [source, unselectedSource]);
     assert.equal(grounded.status, 200);
     assert.equal(grounded.route, 'grounded');
     assert.equal(grounded.model, 'gemini-3.6-flash (Source-Grounded)');
     assert.equal(grounded.citations.length, 1);
     assert.equal(grounded.citations[0].pageNumber, 1);
+    const groundedRequest = requestBodies[1];
+    assert.match(groundedRequest, /only information supported by the student's selected source passages/i);
+    assert.match(groundedRequest, /analogies, examples, definitions, or comparisons only when the selected passages support them/i);
+    assert.match(groundedRequest, /not contain enough information.*state that limitation clearly/i);
+    assert.match(groundedRequest, /do not fill gaps with general model knowledge/i);
+    assert.doesNotMatch(groundedRequest, /general-knowledge teaching may supplement|identify supplementary parts/i);
+    assert.ok(groundedRequest.includes(source.chunks[0].extractedText));
+    assert.ok(!groundedRequest.includes('UNSELECTED_SOURCE_CONTENT'));
+    assert.doesNotMatch(requestBodies[0], /sole authority for this answer/i);
     const originalQuestion = 'According to my uploaded notes only, explain inheritance. Do not use external knowledge.';
     const sourceBounded = await request(originalQuestion, 'grounded_study', ['java']);
     assert.equal(sourceBounded.status, 200);
     assert.equal(sourceBounded.route, 'grounded');
     assert.ok(requestBodies[2].includes(originalQuestion));
+    assert.match(requestBodies[2], /respect the student's explicit source-boundary instructions/i);
     assert.equal(urls.length, 3);
     assert.ok(urls.every(url => url.includes('gemini-3.6-flash:generateContent')));
   } finally {

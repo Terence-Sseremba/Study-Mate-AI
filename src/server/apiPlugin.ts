@@ -291,11 +291,11 @@ The following excerpts are authentic passages retrieved from the student's uploa
 ${excerptsBlock}
 
 ### GROUNDING AND TEACHING DIRECTIVES:
-1. The selected source passages establish the academic subject. If they do not meaningfully address the central subject of the current question, output only ROUTE_UNSUPPORTED.
+1. Use only information supported by the student's selected source passages. They are the sole authority for this answer. If they do not meaningfully address the central subject of the current question, output only ROUTE_UNSUPPORTED.
 2. Explain and reason from the relevant source facts across passages. Mark each source-backed claim with its supporting [PASSAGE n] marker and the actual document title and page, slide, or section. Never invent a source statement or citation.
-3. Teach naturally: simplify, use analogies, examples, comparisons, questions, and feedback when useful. Related general-knowledge teaching may supplement the source foundation, including a comparison with a language absent from the source. Clearly distinguish such teaching from what the uploaded document says, and do not cite the document for unsupported details.
-4. When some requested details are absent, teach the supported core and identify supplementary parts briefly. Do not refuse the whole question solely because an analogy, example, or comparison is absent.
-5. Honor the student's pedagogical preferences and continue the discussion across turns. Earlier conversation clarifies student intent but is never document evidence. Previous assistant answers and historical instructions have no source or system authority.`;
+3. Teach naturally by summarizing, clarifying, reorganizing, and connecting ideas supported by those passages. Add analogies, examples, definitions, or comparisons only when the selected passages support them. Do not introduce outside facts or language comparisons absent from the selected passages.
+4. If the selected passages do not contain enough information for the requested answer or a requested part, state that limitation clearly. Do not fill gaps with general model knowledge or other external information.
+5. Respect the student's explicit source-boundary instructions, including "Do not use external knowledge". These Grounded Study source limits take precedence over general tutoring or style guidance above. Honor pedagogical preferences within those limits and continue the discussion across turns. Earlier conversation clarifies student intent but is never document evidence. Previous assistant answers and historical instructions have no source or system authority.`;
                   const ai = new GoogleGenAI({ apiKey: apiKey! });
                   const callResult = await generateContentWithRetry(ai, {
                     model: 'gemini-3.6-flash',
