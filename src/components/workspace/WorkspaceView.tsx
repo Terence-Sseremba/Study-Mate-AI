@@ -1658,7 +1658,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             <textarea
               ref={textareaRef}
               className="w-full bg-transparent text-neutral-900 text-sm placeholder-neutral-500 focus:outline-none resize-none px-3 py-1 font-sans"
-              placeholder="Ask a question about your sources..."
+              placeholder={interactionMode === 'grounded_study'
+                ? (messages.length > 0 ? 'Reply to StudyMate...' : 'Ask about your sources...')
+                : (messages.length > 0 ? 'Reply to StudyMate...' : 'Ask StudyMate a question...')}
               rows={2}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}

@@ -72,8 +72,19 @@ const STOP_WORDS = new Set([
   'passage', 'passages', 'topic', 'topics', 'point', 'points', 'aspect', 'aspects',
   'factor', 'factors', 'element', 'elements', 'information', 'info', 'regarding',
   'concerning', 'discuss', 'discussed', 'takeaway', 'takeaways', 'difficult', 'hard',
-  'complex', 'simple', 'easy', 'clear', 'clearly'
+  'complex', 'simple', 'easy', 'clear', 'clearly',
+  'analogy', 'analogies', 'analogous', 'another', 'interactive', 'interactively',
+  'educational', 'discussion', 'idea', 'ideas', 'illustrate', 'illustration',
+  'illustrations', 'demonstrate', 'demonstration', 'practice', 'practise',
+  'walk', 'through', 'step', 'steps', 'related', 'relation', 'relate',
+  'similar', 'similarly', 'equivalent', 'way', 'ways', 'language', 'languages',
+  'quiz', 'quizzes', 'ask', 'feedback', 'answer', 'answers', 'respond', 'response',
+  'correct', 'incorrect', 'think',
+  'kindly', 'together', 'free', 'freely', 'fruitful', 'discussing',
+  'demonstrating', 'feel', 'conversation', 'conversational'
 ]);
+
+const LANGUAGE_TOKENS = new Set(['c#', 'c++']);
 
 /**
  * Structural prefixes that often precede a single-letter or numeric designator
@@ -131,6 +142,7 @@ const CHALLENGE_SYNONYMS = new Set([
  * Normalizes a word by stripping common English inflectional suffixes.
  */
 export function stemWord(w: string): string {
+  if (LANGUAGE_TOKENS.has(w.toLowerCase())) return w.toLowerCase();
   const s = w.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (s.endsWith('ies') && s.length > 4) return s.slice(0, -3) + 'y';
   if (s.endsWith('es') && s.length > 4) return s.slice(0, -2);
@@ -146,6 +158,9 @@ export function stemWord(w: string): string {
  * or standard academic synonyms (e.g. taxation <-> tax, requirements <-> deliverables).
  */
 export function wordsMatch(w1: string, w2: string): boolean {
+  if (LANGUAGE_TOKENS.has(w1.toLowerCase()) || LANGUAGE_TOKENS.has(w2.toLowerCase())) {
+    return w1.toLowerCase() === w2.toLowerCase();
+  }
   const clean1 = w1.toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
   const clean2 = w2.toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
   if (!clean1 || !clean2) return false;
@@ -192,11 +207,19 @@ export function wordsMatch(w1: string, w2: string): boolean {
  * Tokenizes a string into normalized, significant query keywords.
  * Preserves single-letter/numeric designators (such as "d" in "Track D" or "2" in "Tier 2").
  */
+// Canonicalize dimension wording without changing the stored source excerpt.
+// Covers multiplication signs, letter x, and "by" in questions and PDF text.
+export function normalizeAcademicText(text: string): string {
+  return text.toLowerCase()
+    .replace(/(\d+)\s*(?:×|x|by)\s*(\d+)/gi, '$1x$2')
+    .replace(/[−–—]/g, '-');
+}
+
 export function extractQueryKeywords(query: string): string[] {
-  const normalized = query
+  const normalized = normalizeAcademicText(query)
     .toLowerCase()
     .replace(/['’]/g, '')
-    .replace(/[^a-z0-9\s_-]/g, ' ')
+    .replace(/[^a-z0-9+#\s_-]/g, ' ')
     .trim();
 
   const rawTokens = normalized.split(/\s+/).filter((w) => w.length >= 1);
@@ -239,10 +262,10 @@ export function extractQueryKeywords(query: string): string[] {
  * Extracts multi-word concept phrases (e.g., "track d", "object-oriented programming", "sequential circuit", "presumptive tax")
  */
 export function extractQueryPhrases(query: string): string[] {
-  const normalized = query
+  const normalized = normalizeAcademicText(query)
     .toLowerCase()
     .replace(/['’]/g, '')
-    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/[^a-z0-9+#\s-]/g, ' ')
     .trim();
 
   const rawTokens = normalized.split(/\s+/).filter((w) => w.length >= 1);
@@ -304,10 +327,28 @@ function isBroadDocumentStudyQuery(query: string, extractedKeywords: string[]): 
   );
 }
 
+// Remove only explicit source-boundary instructions from retrieval scoring.
+// The original question remains in the conversation sent to the tutor.
+const SOURCE_REFERENCE = String.raw`(?:my|the)\s+(?:(?:uploaded|selected)\s+)?(?:(?:lecture|course)\s+)?(?:notes?|materials?|documents?|files?|pdfs?|sources?)`;
+const SOURCE_BOUNDARY_PATTERNS = [
+  new RegExp(String.raw`\b(?:according\s+to|based\s+(?:only\s+)?on)\s+${SOURCE_REFERENCE}(?:\s+only)?\b`, 'gi'),
+  new RegExp(String.raw`\b(?:use|using|consult|rely\s+on)\s+only\s+${SOURCE_REFERENCE}\b`, 'gi'),
+  new RegExp(String.raw`\bonly\s+(?:use|consult)\s+${SOURCE_REFERENCE}\b`, 'gi'),
+  new RegExp(String.raw`\b(?:use|using|consult|rely\s+on)\s+${SOURCE_REFERENCE}\s+only\b`, 'gi'),
+  /\b(?:do\s+not|don't|without)\s+(?:use|using|include|including|rely\s+on|relying\s+on|draw\s+on|drawing\s+on)\s+(?:any\s+)?(?:external|outside|general)\s+(?:knowledge|information|sources?)\b/gi,
+];
+
+export function normalizeRetrievalQuery(query: string): string {
+  return SOURCE_BOUNDARY_PATTERNS.reduce((text, pattern) => text.replace(pattern, ' '), query)
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, '');
+}
+
 export interface ScoredChunkMatch {
   chunk: SourceChunk;
   score: number; // 0.0 to 1.0
   matchedKeywords: string[];
+  matchedContentKeywords?: string[];
   exactPhraseFound: boolean;
   headingMatch: boolean;
   proximitySpan?: number;
@@ -337,64 +378,16 @@ export function isChunkGenuinelyRelevant(
     return false;
   }
 
-  // Separate specific domain keywords (e.g. "track", "d", "sequential", "circuit", "vat")
-  // from generic inquiry nouns (e.g. "requirements", "rules", "steps", "system").
+  // A title alone, or an incidental generic word, is not document evidence.
   const specificKeywords = queryKeywords.filter((k) => !GENERIC_INQUIRY_NOUNS.has(k));
   if (specificKeywords.length > 0) {
-    const matchedSpecific = match.matchedKeywords.filter((k) => !GENERIC_INQUIRY_NOUNS.has(k));
+    const matchedSpecific = (match.matchedContentKeywords || match.matchedKeywords)
+      .filter((k) => !GENERIC_INQUIRY_NOUNS.has(k));
     if (matchedSpecific.length === 0) {
-      // Matched only a generic word like "requirements" or "system" without matching the actual subject!
       return false;
     }
-
-    // If there are multiple specific keywords (e.g. "sequential" + "circuit", or "track" + "d"),
-    // require either an exact phrase match, a heading match on a specific keyword, or >= 50% specific coverage
-    if (specificKeywords.length >= 2 && !match.exactPhraseFound) {
-      const specificCoverage = matchedSpecific.length / specificKeywords.length;
-      if (specificCoverage < 0.5) {
-        return false;
-      }
-    }
   }
-
-  // Exact multi-word concept phrase match is verified strong evidence
-  if (match.exactPhraseFound && match.score >= Math.min(0.38, minimumThreshold)) {
-    return true;
-  }
-
-  // Heading match with solid keyword support
-  if (match.headingMatch && match.score >= 0.36) {
-    return true;
-  }
-
-  // For multi-word queries:
-  if (queryKeywords.length >= 2) {
-    const coverage = match.matchedKeywords.length / queryKeywords.length;
-
-    // Must match at least 2 distinct keywords with sufficient coverage
-    if (match.matchedKeywords.length >= 2 && coverage >= 0.50 && match.score >= 0.38) {
-      return true;
-    }
-
-    // High-confidence specific keyword match (e.g. specific keyword matched + strong density)
-    if (
-      specificKeywords.length === 1 &&
-      match.matchedKeywords.some((k) => !GENERIC_INQUIRY_NOUNS.has(k)) &&
-      match.score >= 0.38
-    ) {
-      return true;
-    }
-
-    if (match.score >= 0.55 && specificKeywords.length <= 1) {
-      return true;
-    }
-
-    // Fails gate: matching loose or scattered query terms without phrase/heading/proximity
-    return false;
-  }
-
-  // For single-word specific technical queries (e.g., "depreciation", "latch", "taxation"):
-  return match.score >= 0.36;
+  return match.score >= minimumThreshold;
 }
 
 /**
@@ -454,12 +447,21 @@ export function retrieveRelevantChunks(
     };
   }
 
-  const queryKeywords = extractQueryKeywords(query);
-  const queryPhrases = extractQueryPhrases(query);
+  const scoringQuery = normalizeRetrievalQuery(query);
+  const rawQueryKeywords = extractQueryKeywords(scoringQuery);
+  // A requested comparison language can be taught as a supplement to an
+  // established subject. It must still be matched when it is the subject.
+  const hasComparisonRequest = /\b(?:compare|comparison|versus|vs|same|similar|equivalent|in|using|examples?|analogies?)\b/i.test(scoringQuery);
+  const queryKeywords = rawQueryKeywords.filter((keyword) =>
+    !(LANGUAGE_TOKENS.has(keyword) && hasComparisonRequest && rawQueryKeywords.some((other) =>
+      other !== keyword && !GENERIC_INQUIRY_NOUNS.has(other) && !LANGUAGE_TOKENS.has(other)
+    ))
+  );
+  const queryPhrases = extractQueryPhrases(scoringQuery);
 
   // Handle broad overview/summary/concept study requests on the selected sources
   if (queryKeywords.length === 0) {
-    if (isBroadDocumentStudyQuery(query, queryKeywords)) {
+    if (isBroadDocumentStudyQuery(scoringQuery, queryKeywords)) {
       const representativeMatches: ScoredChunkMatch[] = [];
       // Pick representative chunks across eligible materials
       for (const mat of eligibleMaterials) {
@@ -504,17 +506,17 @@ export function retrieveRelevantChunks(
 
   const scoredList: ScoredChunkMatch[] = allChunks.map((chunk, idx) => {
     const rawText = chunk.extractedText || '';
-    const textLower = rawText.toLowerCase();
+    const textLower = normalizeAcademicText(rawText);
     const effectiveHeading = isGenericSectionHeading(chunk.sectionHeading)
       ? deriveTopicNameFromChunk(chunk, idx)
       : chunk.sectionHeading || '';
-    const headingLower = effectiveHeading.toLowerCase();
-    const docTitleLower = `${chunk.materialTitle || ''} ${(chunk.filename || '').replace(/[_-]/g, ' ')}`.toLowerCase();
+    const headingLower = normalizeAcademicText(effectiveHeading);
+    const docTitleLower = normalizeAcademicText(`${chunk.materialTitle || ''} ${(chunk.filename || '').replace(/[_-]/g, ' ')}`);
 
     // Normalize punctuation into spaces before splitting into word tokens
-    const textWords = textLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
-    const headingWords = headingLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
-    const titleWords = docTitleLower.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+    const textWords = textLower.replace(/[^a-z0-9+#\s-]/g, ' ').split(/\s+/).filter(Boolean);
+    const headingWords = headingLower.replace(/[^a-z0-9+#\s-]/g, ' ').split(/\s+/).filter(Boolean);
+    const titleWords = docTitleLower.replace(/[^a-z0-9+#\s-]/g, ' ').split(/\s+/).filter(Boolean);
 
     const specificKeywords = queryKeywords.filter((k) => !GENERIC_INQUIRY_NOUNS.has(k));
     const nonTitleSpecificKeywords = specificKeywords.filter(
@@ -531,7 +533,7 @@ export function retrieveRelevantChunks(
         // When the query specifies non-title subject keywords (e.g. "Technical Considerations" or "sequential circuits"
         // alongside "Track D"), only count phrases that include at least one non-title subject keyword.
         if (nonTitleSpecificKeywords.length > 0) {
-          const phraseTokens = cleanPhrase.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+          const phraseTokens = cleanPhrase.replace(/[^a-z0-9+#\s-]/g, ' ').split(/\s+/).filter(Boolean);
           const hasNonTitleTopic = nonTitleSpecificKeywords.some((ntk) =>
             phraseTokens.some((pt, pIdx) => tokenMatchesAt(phraseTokens, pIdx, ntk))
           );
@@ -601,28 +603,6 @@ export function retrieveRelevantChunks(
       }
     }
 
-    // If the query asks about specific concepts outside the document title (e.g., "Technical Considerations"
-    // or "sequential circuits" in Track D), the chunk's own text/heading MUST match those concepts.
-    if (nonTitleSpecificKeywords.length > 0) {
-      const matchedNonTitle = nonTitleSpecificKeywords.filter((k) =>
-        matchedContentKeywords.includes(k)
-      );
-      if (
-        matchedNonTitle.length === 0 ||
-        (nonTitleSpecificKeywords.length >= 2 &&
-          !exactPhraseFound &&
-          matchedNonTitle.length / nonTitleSpecificKeywords.length < 0.5)
-      ) {
-        return {
-          chunk,
-          score: 0,
-          matchedKeywords: [],
-          exactPhraseFound: false,
-          headingMatch: false,
-        };
-      }
-    }
-
     const headingKeywordCheckList =
       nonTitleSpecificKeywords.length > 0
         ? nonTitleSpecificKeywords
@@ -652,8 +632,9 @@ export function retrieveRelevantChunks(
       proximitySpan = minSpan;
     }
 
-    const keywordCoverage =
-      queryKeywords.length > 0 ? matchedKeywords.length / queryKeywords.length : 0;
+    // Local scoring measures whether this passage supports a concept. Coverage
+    // of the whole question is evaluated across the selected passages below.
+    const keywordCoverage = matchedKeywords.length / Math.min(queryKeywords.length, 2);
 
     // D. Compute sound composite relevance score
     let rawScore = 0;
@@ -668,6 +649,7 @@ export function retrieveRelevantChunks(
       if (proximitySpan <= 15) rawScore += 0.25;
       else if (proximitySpan <= 35) rawScore += 0.15;
       rawScore += Math.min(termMatchesCount, 6) * 0.03;
+      if (matchedContentKeywords.length > 0) rawScore += 0.15;
     }
 
     const finalScore = Math.min(1.0, Math.max(0.0, rawScore));
@@ -676,6 +658,7 @@ export function retrieveRelevantChunks(
       chunk,
       score: finalScore,
       matchedKeywords,
+      matchedContentKeywords,
       exactPhraseFound,
       headingMatch,
       proximitySpan: tokenPositions.length >= 2 ? proximitySpan : undefined,
@@ -692,7 +675,7 @@ export function retrieveRelevantChunks(
 
   // If query is a broad document study query (e.g. "What are the main requirements?" with no external subject keywords)
   // and no literal keyword matched, fall back to the top chunks of the selected documents.
-  if (qualifyingMatches.length === 0 && isBroadDocumentStudyQuery(query, queryKeywords)) {
+  if (qualifyingMatches.length === 0 && isBroadDocumentStudyQuery(scoringQuery, queryKeywords)) {
     qualifyingMatches = allChunks.slice(0, maxResults).map((chunk) => ({
       chunk,
       score: 0.75,
@@ -702,10 +685,58 @@ export function retrieveRelevantChunks(
     }));
   }
 
-  // 6. Include immediate continuation chunk only when it also has genuine keyword relevance
-  const selectedIds = new Set(qualifyingMatches.slice(0, maxResults).map((m) => m.chunk.id));
-  const topMatches = [...qualifyingMatches.slice(0, maxResults)];
+  // The leading academic concept anchors the request to the selected sources.
+  // A lone incidental mention buried in a passage is not enough. Other concepts
+  // may be established on different pages, but most must have actual content hits.
+  const subjectKeywords = queryKeywords.filter((keyword) => !GENERIC_INQUIRY_NOUNS.has(keyword));
+  if (subjectKeywords.length > 0) {
+    const anchor = subjectKeywords[0];
+    const anchorMatches = qualifyingMatches.filter((match) =>
+      match.matchedContentKeywords?.includes(anchor)
+    );
+    const stronglyAnchored = anchorMatches.some((match) => {
+      const heading = normalizeAcademicText(match.chunk.sectionHeading || '');
+      const opening = normalizeAcademicText(match.chunk.extractedText || '').slice(0, 180);
+      return [heading, opening].some((text) =>
+        text.split(/[^a-z0-9+#]+/).some((word) => wordsMatch(word, anchor))
+      );
+    }) || anchorMatches.length >= 2;
+    const supportedCount = subjectKeywords.filter((keyword) =>
+      qualifyingMatches.some((match) => match.matchedContentKeywords?.includes(keyword))
+    ).length;
+    if (!stronglyAnchored || supportedCount / subjectKeywords.length < 0.67) {
+      qualifyingMatches = [];
+    }
+  }
 
+  // Cover distinct concepts first, then use remaining space for the best supporting
+  // passages. This keeps separate pages for inheritance and casting within budget.
+  const topMatches: ScoredChunkMatch[] = [];
+  const selectedIds = new Set<string>();
+  const uncovered = new Set(subjectKeywords);
+  while (topMatches.length < maxResults && uncovered.size > 0) {
+    const next = qualifyingMatches
+      .filter((match) => !selectedIds.has(match.chunk.id))
+      .map((match) => ({
+        match,
+        newCoverage: (match.matchedContentKeywords || []).filter((keyword) => uncovered.has(keyword)).length,
+      }))
+      .filter((candidate) => candidate.newCoverage > 0)
+      .sort((a, b) => b.newCoverage - a.newCoverage || b.match.score - a.match.score)[0];
+    if (!next) break;
+    topMatches.push(next.match);
+    selectedIds.add(next.match.chunk.id);
+    for (const keyword of next.match.matchedContentKeywords || []) uncovered.delete(keyword);
+  }
+  for (const match of qualifyingMatches) {
+    if (topMatches.length >= maxResults) break;
+    if (!selectedIds.has(match.chunk.id)) {
+      topMatches.push(match);
+      selectedIds.add(match.chunk.id);
+    }
+  }
+
+  // 6. Include immediate continuation chunk only when it also has genuine keyword relevance
   if (topMatches.length > 0 && topMatches.length < maxResults) {
     const primary = topMatches[0];
     const primaryIndex = primary.chunk.chunkIndex;
